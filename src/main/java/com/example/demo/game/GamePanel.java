@@ -1388,24 +1388,41 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
                 }
             }
             case BOW -> {
-                int tipX = (int) (px + Math.cos(player.aimAngle) * 20 * ZOOM);
-                int tipY = (int) (py + Math.sin(player.aimAngle) * 20 * ZOOM);
-                int side = Math.cos(player.aimAngle) >= 0 ? 1 : -1;
-                int arcW = (int) Math.round(10 * ZOOM);
-                int arcH = (int) Math.round(16 * ZOOM);
+                double dirX = Math.cos(player.aimAngle);
+                double dirY = Math.sin(player.aimAngle);
+                double perpX = -dirY;
+                double perpY = dirX;
+                double bowCenterX = px + dirX * 16.0 * ZOOM;
+                double bowCenterY = py + dirY * 16.0 * ZOOM;
+                double limbHalf = 7.0 * ZOOM;
+                double bowDepth = 4.5 * ZOOM;
+
+                double topX = bowCenterX + perpX * limbHalf;
+                double topY = bowCenterY + perpY * limbHalf;
+                double bottomX = bowCenterX - perpX * limbHalf;
+                double bottomY = bowCenterY - perpY * limbHalf;
+                double gripX = bowCenterX - dirX * bowDepth;
+                double gripY = bowCenterY - dirY * bowDepth;
+
+                Path2D.Double bowShape = new Path2D.Double();
+                bowShape.moveTo(topX, topY);
+                bowShape.quadTo(bowCenterX + dirX * bowDepth, bowCenterY + dirY * bowDepth, gripX, gripY);
+                bowShape.quadTo(bowCenterX + dirX * bowDepth, bowCenterY + dirY * bowDepth, bottomX, bottomY);
 
                 g2.setColor(new Color(116, 78, 44));
-                g2.setStroke(new BasicStroke((float) (2.5f * ZOOM / 2.0)));
-                g2.drawArc(tipX - arcW / 2, tipY - arcH / 2, arcW, arcH, side > 0 ? 80 : 260, 200);
+                g2.setStroke(new BasicStroke((float) (2.5f * ZOOM / 2.0), BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+                g2.draw(bowShape);
 
                 g2.setColor(new Color(225, 225, 220, 200));
-                g2.setStroke(new BasicStroke((float) (1.3f * ZOOM / 2.0)));
-                g2.drawLine(tipX, tipY - arcH / 2 + 1, tipX, tipY + arcH / 2 - 1);
+                g2.setStroke(new BasicStroke((float) (1.3f * ZOOM / 2.0), BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+                g2.drawLine((int) Math.round(topX), (int) Math.round(topY), (int) Math.round(bottomX), (int) Math.round(bottomY));
 
-                int arrowX2 = (int) (tipX + Math.cos(player.aimAngle) * 8 * ZOOM);
-                int arrowY2 = (int) (tipY + Math.sin(player.aimAngle) * 8 * ZOOM);
+                int arrowX1 = (int) Math.round(gripX - dirX * 4.0 * ZOOM);
+                int arrowY1 = (int) Math.round(gripY - dirY * 4.0 * ZOOM);
+                int arrowX2 = (int) Math.round(bowCenterX + dirX * 12.0 * ZOOM);
+                int arrowY2 = (int) Math.round(bowCenterY + dirY * 12.0 * ZOOM);
                 g2.setColor(new Color(170, 170, 170));
-                g2.drawLine(handX, handY, arrowX2, arrowY2);
+                g2.drawLine(arrowX1, arrowY1, arrowX2, arrowY2);
             }
             case STONE -> {
                 int stoneX = (int) (px + Math.cos(player.aimAngle) * 14 * ZOOM);
