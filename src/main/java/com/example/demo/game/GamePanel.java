@@ -119,16 +119,17 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
     private static final double STRUCTURE_PROJECTILE_SPEED = PLAYER_MOVE_SPEED * 1.1;
     private static final double STRUCTURE_PROJECTILE_LIFETIME = 24.0;
     private static final double STONE_PROJECTILE_SPEED_MULTIPLIER = 1.15;
-    private static final double ARROW_PROJECTILE_SPEED_MULTIPLIER = 1.5;
+    private static final double ARROW_PROJECTILE_SPEED_MULTIPLIER = 1.65;
     private static final double PROJECTILE_IMPACT_DURATION = 0.24;
+    private static final double HERO_BASE_ATTACK_RATE_DIVISOR = 3.0;
     private static final double UNIT_DEATH_DISSOLVE_DURATION = 0.62;
     private static final double PLAYER_DAMAGE_BAR_SEGMENT_DURATION = 1.0;
     private static final double CAMERA_MOVE_SPEED = 240.0;
     private static final double CAMERA_EDGE_MOVE_SPEED = 420.0;
     private static final int CAMERA_EDGE_SCROLL_MARGIN = 28;
     private static final double WORLD_SOUND_RADIUS_MULTIPLIER = 1.3;
-    private static final double CLICK_MARKER_OUTER_FADE_DURATION = 1.0;
-    private static final double CLICK_MARKER_INNER_FADE_DURATION = 0.45;
+    private static final double CLICK_MARKER_OUTER_FADE_DURATION = 0.5;
+    private static final double CLICK_MARKER_INNER_FADE_DURATION = 0.225;
     private static final double CLICK_MARKER_LIFETIME = CLICK_MARKER_OUTER_FADE_DURATION + CLICK_MARKER_INNER_FADE_DURATION;
     private static final double CLICK_MARKER_ARROW_SPEED_MULTIPLIER = 1.25;
     private static final double CLICK_MARKER_SCALE = 0.5;
@@ -832,7 +833,7 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
 
     private double playerWeaponReach() {
         if (currentWeapon.projectile()) {
-            return heroProjectileSpeed(currentWeapon) * heroProjectileLife(currentWeapon) + currentWeapon.projectileRadius();
+            return heroProjectileSpeed(currentWeapon) * heroProjectileLife(currentWeapon) + heroProjectileRadius(currentWeapon);
         }
         return currentWeapon.meleeRange() * ATTACK_RANGE_BALANCE_SCALE;
     }
@@ -854,6 +855,14 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
         return Math.max(0.18, reach / speed);
     }
 
+    private double heroProjectileRadius(WeaponType weapon) {
+        return switch (weapon) {
+            case STONE -> weapon.projectileRadius() / 2.5;
+            case BOW -> weapon.projectileRadius() / 2.0;
+            case SWORD -> 0.0;
+        };
+    }
+
     private ProjectileType heroProjectileType(WeaponType weapon) {
         return weapon == WeaponType.BOW ? ProjectileType.ARROW : ProjectileType.STONE;
     }
@@ -871,11 +880,11 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
     }
 
     private double heroAttackCooldown(Player hero, WeaponType weapon) {
-        return Math.max(0.08, weapon.cooldown() / Math.max(0.4, hero.attackSpeedMultiplier));
+        return Math.max(0.08, weapon.cooldown() * HERO_BASE_ATTACK_RATE_DIVISOR / Math.max(0.4, hero.attackSpeedMultiplier));
     }
 
     private double heroAttackAnimationTime(Player hero, WeaponType weapon) {
-        return Math.max(0.08, weapon.attackAnimationTime() / Math.max(0.55, hero.attackSpeedMultiplier));
+        return Math.max(0.08, weapon.attackAnimationTime() * HERO_BASE_ATTACK_RATE_DIVISOR / Math.max(0.55, hero.attackSpeedMultiplier));
     }
 
     private double scaleAttackRange(double range) {
@@ -1095,7 +1104,7 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
         double speed = heroProjectileSpeed(weapon);
         bullet.vx = dx * speed;
         bullet.vy = dy * speed;
-        bullet.radius = weapon.projectileRadius();
+        bullet.radius = heroProjectileRadius(weapon);
         bullet.life = heroProjectileLife(weapon);
         bullet.maxLife = bullet.life;
         bullet.damage = heroWeaponDamage(player, weapon);
@@ -3993,9 +4002,9 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
     }
 
     private void drawClickArrowFlow(Graphics2D g2, int sx, int sy, boolean attack, double elapsed) {
-        Color outerCore = attack ? new Color(255, 98, 82) : new Color(74, 230, 118);
-        Color innerCore = attack ? new Color(255, 196, 182) : new Color(188, 255, 206);
-        Color glow = attack ? new Color(255, 102, 84, 84) : new Color(82, 236, 124, 78);
+        Color outerCore = attack ? new Color(168, 255, 92) : new Color(124, 244, 76);
+        Color innerCore = attack ? new Color(228, 255, 176) : new Color(214, 255, 162);
+        Color glow = attack ? new Color(146, 255, 86, 90) : new Color(126, 255, 92, 82);
 
         double outerTravel = smoothstep(clamp(
                 elapsed * CLICK_MARKER_ARROW_SPEED_MULTIPLIER / CLICK_MARKER_OUTER_FADE_DURATION,
@@ -5358,7 +5367,7 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
     private void drawJellyProjectile(Graphics2D g2, Bullet bullet, int bx, int by, int radius) {
         double angle = Math.atan2(bullet.vy, bullet.vx);
         double progress = bullet.maxLife <= 0.0001 ? 0.0 : 1.0 - clamp(bullet.life / bullet.maxLife, 0.0, 1.0);
-        double pulse = Math.sin(progress * Math.PI * 6.0 + bullet.life * 11.0) * 0.12;
+        double pulse = Math.sin(progress * Math.PI * 6.0 + bullet.life * 11.0) * projectilePulseAmplitude(bullet.projectileType);
         double stretch = projectileStretch(bullet.projectileType) + pulse;
         double squash = Math.max(0.62, 0.9 - pulse * 0.45);
 
@@ -5398,10 +5407,19 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
 
     private double projectileStretch(ProjectileType projectileType) {
         return switch (projectileType) {
-            case ARROW -> 1.55;
+            case ARROW -> 1.38;
             case MAGIC_ORB, STRUCTURE_ORB -> 1.38;
             case STONE -> 1.22;
             case CATAPULT_ROCK -> 1.12;
+        };
+    }
+
+    private double projectilePulseAmplitude(ProjectileType projectileType) {
+        return switch (projectileType) {
+            case ARROW -> 0.075;
+            case MAGIC_ORB, STRUCTURE_ORB -> 0.1;
+            case STONE -> 0.12;
+            case CATAPULT_ROCK -> 0.085;
         };
     }
 
