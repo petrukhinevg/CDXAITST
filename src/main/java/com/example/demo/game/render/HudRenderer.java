@@ -89,7 +89,7 @@ public final class HudRenderer {
 
     private void drawProgressPanel(Graphics2D g2, Model model) {
         int panelW = Math.min(560, Math.max(420, model.panelWidth() - 420));
-        int panelH = 148;
+        int panelH = 180;
         int panelX = (model.panelWidth() - panelW) / 2;
         int panelY = model.panelHeight() - panelH - 18;
 
@@ -98,14 +98,19 @@ public final class HudRenderer {
         g2.setFont(new Font("SansSerif", Font.PLAIN, 14));
 
         drawHudText(g2, "Оружие: " + model.currentWeapon().displayName(), panelX, panelY + 44);
-        drawHudText(g2, "XP: " + model.player().xp + " / " + model.player().xpToNextLevel, panelX, panelY + 70);
+        drawHudText(g2, "HP: " + model.player().hp + " / " + model.player().maxHp, panelX, panelY + 70);
         drawBar(g2, panelX, panelY + 80, panelW, 13,
+                model.player().maxHp == 0 ? 0.0 : (double) model.player().hp / model.player().maxHp,
+                new Color(224, 88, 84), new Color(96, 32, 30), new Color(190, 190, 190));
+
+        drawHudText(g2, "XP: " + model.player().xp + " / " + model.player().xpToNextLevel, panelX, panelY + 102);
+        drawBar(g2, panelX, panelY + 112, panelW, 13,
                 model.player().xpToNextLevel == 0 ? 0.0 : (double) model.player().xp / model.player().xpToNextLevel,
                 new Color(91, 190, 255), new Color(31, 67, 93), new Color(190, 190, 190));
 
         g2.setFont(new Font("SansSerif", Font.PLAIN, 12));
         int slotGap = 10;
-        int abilityY = panelY + 104;
+        int abilityY = panelY + 136;
         int abilityW = (panelW - slotGap * Math.max(0, model.abilities().size() - 1)) / Math.max(1, model.abilities().size());
         int abilityH = 28;
         int abilityX = panelX;

@@ -121,6 +121,7 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
     private static final double CAMERA_MOVE_SPEED = 240.0;
     private static final double CAMERA_EDGE_MOVE_SPEED = 420.0;
     private static final int CAMERA_EDGE_SCROLL_MARGIN = 28;
+    private static final double WORLD_SOUND_RADIUS_MULTIPLIER = 1.3;
     private static final double CLICK_MARKER_OUTER_FADE_DURATION = 1.0;
     private static final double CLICK_MARKER_INNER_FADE_DURATION = 0.45;
     private static final double CLICK_MARKER_LIFETIME = CLICK_MARKER_OUTER_FADE_DURATION + CLICK_MARKER_INNER_FADE_DURATION;
@@ -1124,7 +1125,7 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
             boolean hitTerrain = bullet.terrainCollision && map.isBlockedPixel(bullet.x, bullet.y);
             if (bullet.life <= 0.0 || hitTerrain) {
                 if (hitTerrain) {
-                    audio.onProjectileImpact();
+                    playProjectileImpactSound(bullet.x, bullet.y);
                 }
                 it.remove();
                 continue;
@@ -1137,7 +1138,7 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
                 }
                 if (distance(bullet.x, bullet.y, hero.x, hero.y) <= bullet.radius + hero.radius) {
                     damageHero(hero, bullet.damage);
-                    audio.onProjectileImpact();
+                    playProjectileImpactSound(hero.x, hero.y);
                     hit = true;
                     break;
                 }
@@ -1154,7 +1155,7 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
                 }
                 if (distance(bullet.x, bullet.y, creep.x, creep.y) <= bullet.radius + creep.radius) {
                     damageCreepByHero(creep, bullet.damage);
-                    audio.onProjectileImpact();
+                    playProjectileImpactSound(creep.x, creep.y);
                     hit = true;
                     break;
                 }
@@ -1167,7 +1168,7 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
                     }
                     if (distance(bullet.x, bullet.y, creep.x, creep.y) <= bullet.radius + creep.radius) {
                         damageCreepByHero(creep, bullet.damage);
-                        audio.onProjectileImpact();
+                        playProjectileImpactSound(creep.x, creep.y);
                         hit = true;
                         break;
                     }
@@ -1181,7 +1182,7 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
                     }
                     if (distance(bullet.x, bullet.y, structure.x, structure.y) <= bullet.radius + structure.radius) {
                         damageStructure(structure, bullet.damage);
-                        audio.onProjectileImpact();
+                        playProjectileImpactSound(structure.x, structure.y);
                         hit = true;
                         break;
                     }
@@ -1213,7 +1214,7 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
         double hitDistance = bullet.radius + bullet.target.getRadius();
         if (distanceToTarget <= hitDistance) {
             applyBulletHit(bullet, bullet.target);
-            audio.onProjectileImpact();
+            playProjectileImpactSound(bullet.target.getX(), bullet.target.getY());
             return true;
         }
 
@@ -1227,7 +1228,7 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
             bullet.x = bullet.target.getX() - dirX * hitDistance;
             bullet.y = bullet.target.getY() - dirY * hitDistance;
             applyBulletHit(bullet, bullet.target);
-            audio.onProjectileImpact();
+            playProjectileImpactSound(bullet.target.getX(), bullet.target.getY());
             return true;
         }
 
@@ -1237,7 +1238,7 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
         boolean hitTerrain = bullet.terrainCollision && map.isBlockedPixel(bullet.x, bullet.y);
         if (bullet.life <= 0.0 || hitTerrain) {
             if (hitTerrain) {
-                audio.onProjectileImpact();
+                playProjectileImpactSound(bullet.x, bullet.y);
             }
             return true;
         }
@@ -1980,7 +1981,7 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
                 continue;
             }
 
-            audio.onStructureAttack();
+            playStructureAttackSound(structure.x, structure.y);
             triggerStructureAttackAnimation(structure, structure.attackTarget);
             fireStructureProjectile(structure, structure.attackTarget);
             structure.attackTimer = structure.attackCooldown;
@@ -2235,7 +2236,7 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
             creep.deniedByHero = denyKill;
             beginCreepDeath(creep);
             if (!denyKill) {
-                audio.onEnemyDown();
+                playEnemyDownSound(creep.x, creep.y);
             }
         }
     }
@@ -2270,7 +2271,7 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
         int previousHp = structure.hp;
         damageEntity(structure, damage);
         if (previousHp > 0 && structure.hp <= 0) {
-            audio.onEnemyDown();
+            playEnemyDownSound(structure.x, structure.y);
         }
     }
 
@@ -2287,7 +2288,7 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
         if (hero == player) {
             audio.onPlayerHit();
         } else if (hero.hp <= 0) {
-            audio.onEnemyDown();
+            playEnemyDownSound(hero.x, hero.y);
         }
         if (hero.hp <= 0) {
             beginHeroDeath(hero);
@@ -2748,6 +2749,33 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
         }
 
         return true;
+    }
+
+    private void playProjectileImpactSound(double worldX, double worldY) {
+        if (isWorldSoundAudible(worldX, worldY)) {
+            audio.onProjectileImpact();
+        }
+    }
+
+    private void playStructureAttackSound(double worldX, double worldY) {
+        if (isWorldSoundAudible(worldX, worldY)) {
+            audio.onStructureAttack();
+        }
+    }
+
+    private void playEnemyDownSound(double worldX, double worldY) {
+        if (isWorldSoundAudible(worldX, worldY)) {
+            audio.onEnemyDown();
+        }
+    }
+
+    private boolean isWorldSoundAudible(double worldX, double worldY) {
+        double visibleWorldW = viewportWidth() / ZOOM;
+        double visibleWorldH = viewportHeight() / ZOOM;
+        double centerX = cameraX + visibleWorldW * 0.5;
+        double centerY = cameraY + visibleWorldH * 0.5;
+        double audibleRadius = Math.max(visibleWorldW, visibleWorldH) * 0.5 * WORLD_SOUND_RADIUS_MULTIPLIER;
+        return distance(worldX, worldY, centerX, centerY) <= audibleRadius;
     }
 
     private void centerCameraOnPlayer() {
@@ -3751,75 +3779,9 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
     private void drawClickMarkers(Graphics2D g2) {
         for (ClickMarker marker : clickMarkers) {
             double elapsed = CLICK_MARKER_LIFETIME - marker.lifetime;
-            double progress = elapsed / CLICK_MARKER_LIFETIME;
-            double inward = 1.0 - smoothstep(progress);
-            double outerFade = 1.0 - smoothstep(clamp(elapsed / CLICK_MARKER_OUTER_FADE_DURATION, 0.0, 1.0));
-            double innerPhaseElapsed = Math.max(0.0, elapsed - CLICK_MARKER_OUTER_FADE_DURATION);
-            double innerFade = 1.0 - smoothstep(clamp(innerPhaseElapsed / CLICK_MARKER_INNER_FADE_DURATION, 0.0, 1.0));
             int sx = worldToScreenX(marker.x);
             int sy = worldToScreenY(marker.y);
-            Stroke oldStroke = g2.getStroke();
-            if (marker.attack) {
-                int outerRadius = scaledClickSize(9.0 + inward * 23.0);
-                int innerRadius = scaledClickSize(3.0 + inward * 9.0);
-                int spikeGap = scaledClickSize(5.0 + inward * 13.0);
-                int spikeLen = scaledClickSize(4.0 + inward * 7.0);
-                int diagRadius = scaledClickSize(2.0 + inward * 6.0);
-                int outerAlpha = visibilityAlpha(76, outerFade);
-                int lineAlpha = visibilityAlpha(220, outerFade);
-                int innerAlpha = visibilityAlpha(210, innerFade);
-
-                g2.setColor(new Color(255, 94, 78, outerAlpha));
-                g2.fillOval(sx - outerRadius, sy - outerRadius, outerRadius * 2, outerRadius * 2);
-
-                g2.setStroke(new BasicStroke((float) Math.max(1.2, 1.5 * CLICK_MARKER_SCALE + 1.5 * (1.0 - progress))));
-                g2.setColor(new Color(255, 98, 82, lineAlpha));
-                g2.drawOval(sx - outerRadius, sy - outerRadius, outerRadius * 2, outerRadius * 2);
-
-                g2.setColor(new Color(255, 182, 166, innerAlpha));
-                g2.drawOval(sx - innerRadius, sy - innerRadius, innerRadius * 2, innerRadius * 2);
-
-                g2.setColor(new Color(255, 98, 82, lineAlpha));
-                g2.drawLine(sx - spikeGap - spikeLen, sy, sx - spikeGap, sy);
-                g2.drawLine(sx + spikeGap, sy, sx + spikeGap + spikeLen, sy);
-                g2.drawLine(sx, sy - spikeGap - spikeLen, sx, sy - spikeGap);
-                g2.drawLine(sx, sy + spikeGap, sx, sy + spikeGap + spikeLen);
-
-                g2.setColor(new Color(255, 182, 166, innerAlpha));
-                g2.drawLine(sx - diagRadius, sy - diagRadius, sx + diagRadius, sy + diagRadius);
-                g2.drawLine(sx - diagRadius, sy + diagRadius, sx + diagRadius, sy - diagRadius);
-            } else {
-                int outerRadius = scaledClickSize(7.0 + inward * 19.0);
-                int innerRadius = scaledClickSize(3.0 + inward * 8.0);
-                int bracketOffset = scaledClickSize(4.0 + inward * 10.0);
-                int bracketLen = scaledClickSize(4.0 + inward * 6.0);
-                int outerAlpha = visibilityAlpha(68, outerFade);
-                int ringAlpha = visibilityAlpha(220, outerFade);
-                int bracketAlpha = visibilityAlpha(220, innerFade);
-
-                g2.setColor(new Color(88, 236, 132, outerAlpha));
-                g2.fillOval(sx - outerRadius, sy - outerRadius, outerRadius * 2, outerRadius * 2);
-
-                g2.setStroke(new BasicStroke((float) Math.max(1.2, 1.4 * CLICK_MARKER_SCALE + 1.4 * (1.0 - progress))));
-                g2.setColor(new Color(74, 230, 118, ringAlpha));
-                g2.drawOval(sx - outerRadius, sy - outerRadius, outerRadius * 2, outerRadius * 2);
-                g2.setColor(new Color(74, 230, 118, bracketAlpha));
-                g2.drawOval(sx - innerRadius, sy - innerRadius, innerRadius * 2, innerRadius * 2);
-
-                g2.setColor(new Color(74, 230, 118, bracketAlpha));
-                g2.drawLine(sx - bracketOffset - bracketLen, sy - bracketOffset, sx - bracketOffset, sy - bracketOffset);
-                g2.drawLine(sx - bracketOffset, sy - bracketOffset - bracketLen, sx - bracketOffset, sy - bracketOffset);
-
-                g2.drawLine(sx + bracketOffset, sy - bracketOffset, sx + bracketOffset + bracketLen, sy - bracketOffset);
-                g2.drawLine(sx + bracketOffset, sy - bracketOffset - bracketLen, sx + bracketOffset, sy - bracketOffset);
-
-                g2.drawLine(sx - bracketOffset - bracketLen, sy + bracketOffset, sx - bracketOffset, sy + bracketOffset);
-                g2.drawLine(sx - bracketOffset, sy + bracketOffset, sx - bracketOffset, sy + bracketOffset + bracketLen);
-
-                g2.drawLine(sx + bracketOffset, sy + bracketOffset, sx + bracketOffset + bracketLen, sy + bracketOffset);
-                g2.drawLine(sx + bracketOffset, sy + bracketOffset, sx + bracketOffset, sy + bracketOffset + bracketLen);
-            }
-            g2.setStroke(oldStroke);
+            drawClickArrowFlow(g2, sx, sy, marker.attack, elapsed);
         }
     }
 
@@ -3829,6 +3791,112 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
 
     private int visibilityAlpha(int maxAlpha, double visibility) {
         return Math.max(0, Math.min(255, (int) Math.round(maxAlpha * clamp(visibility, 0.0, 1.0))));
+    }
+
+    private void drawClickArrowFlow(Graphics2D g2, int sx, int sy, boolean attack, double elapsed) {
+        Color outerCore = attack ? new Color(255, 98, 82) : new Color(74, 230, 118);
+        Color innerCore = attack ? new Color(255, 196, 182) : new Color(188, 255, 206);
+        Color glow = attack ? new Color(255, 102, 84, 84) : new Color(82, 236, 124, 78);
+
+        double outerTravel = smoothstep(clamp(elapsed / CLICK_MARKER_OUTER_FADE_DURATION, 0.0, 1.0));
+        double outerFade = 1.0 - smoothstep(clamp(elapsed / CLICK_MARKER_OUTER_FADE_DURATION, 0.0, 1.0));
+        drawClickArrowWave(
+                g2,
+                sx,
+                sy,
+                lerp(scaledClickSize(24.0), scaledClickSize(9.0), outerTravel),
+                scaledClickSize(10.0),
+                scaledClickSize(5.5),
+                outerCore,
+                glow,
+                visibilityAlpha(220, outerFade)
+        );
+
+        double innerElapsed = Math.max(0.0, elapsed - CLICK_MARKER_OUTER_FADE_DURATION);
+        double innerTravel = smoothstep(clamp(innerElapsed / CLICK_MARKER_INNER_FADE_DURATION, 0.0, 1.0));
+        double innerFade = 1.0 - smoothstep(clamp(innerElapsed / CLICK_MARKER_INNER_FADE_DURATION, 0.0, 1.0));
+        drawClickArrowWave(
+                g2,
+                sx,
+                sy,
+                lerp(scaledClickSize(10.0), scaledClickSize(2.8), innerTravel),
+                scaledClickSize(7.0),
+                scaledClickSize(4.2),
+                innerCore,
+                glow,
+                visibilityAlpha(210, innerFade)
+        );
+
+        int coreAlpha = visibilityAlpha(160, innerFade);
+        int coreRadius = scaledClickSize(2.8);
+        g2.setColor(new Color(innerCore.getRed(), innerCore.getGreen(), innerCore.getBlue(), coreAlpha));
+        g2.fillOval(sx - coreRadius, sy - coreRadius, coreRadius * 2, coreRadius * 2);
+    }
+
+    private void drawClickArrowWave(Graphics2D g2,
+                                    int sx,
+                                    int sy,
+                                    double tipDistance,
+                                    int arrowLength,
+                                    int arrowWidth,
+                                    Color coreColor,
+                                    Color glowColor,
+                                    int alpha) {
+        if (alpha <= 0) {
+            return;
+        }
+
+        drawInwardArrow(g2, sx, sy - tipDistance, 0.0, 1.0, arrowLength, arrowWidth, coreColor, glowColor, alpha);
+        drawInwardArrow(g2, sx + tipDistance, sy, -1.0, 0.0, arrowLength, arrowWidth, coreColor, glowColor, alpha);
+        drawInwardArrow(g2, sx, sy + tipDistance, 0.0, -1.0, arrowLength, arrowWidth, coreColor, glowColor, alpha);
+        drawInwardArrow(g2, sx - tipDistance, sy, 1.0, 0.0, arrowLength, arrowWidth, coreColor, glowColor, alpha);
+    }
+
+    private void drawInwardArrow(Graphics2D g2,
+                                 double tipX,
+                                 double tipY,
+                                 double dirX,
+                                 double dirY,
+                                 int length,
+                                 int width,
+                                 Color coreColor,
+                                 Color glowColor,
+                                 int alpha) {
+        double headLength = length * 0.58;
+        double baseX = tipX - dirX * headLength;
+        double baseY = tipY - dirY * headLength;
+        double tailX = tipX - dirX * length;
+        double tailY = tipY - dirY * length;
+        double perpX = -dirY;
+        double perpY = dirX;
+
+        Stroke oldStroke = g2.getStroke();
+        g2.setStroke(new BasicStroke(Math.max(1.2f, width * 0.22f), BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+        g2.setColor(new Color(glowColor.getRed(), glowColor.getGreen(), glowColor.getBlue(), Math.max(0, alpha / 3)));
+        g2.drawLine((int) Math.round(tailX), (int) Math.round(tailY), (int) Math.round(baseX), (int) Math.round(baseY));
+
+        Path2D.Double glowHead = new Path2D.Double();
+        glowHead.moveTo(tipX, tipY);
+        glowHead.lineTo(baseX + perpX * width * 0.82, baseY + perpY * width * 0.82);
+        glowHead.lineTo(baseX - perpX * width * 0.82, baseY - perpY * width * 0.82);
+        glowHead.closePath();
+        g2.fill(glowHead);
+
+        g2.setStroke(new BasicStroke(Math.max(1.0f, width * 0.16f), BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+        g2.setColor(new Color(coreColor.getRed(), coreColor.getGreen(), coreColor.getBlue(), alpha));
+        g2.drawLine((int) Math.round(tailX), (int) Math.round(tailY), (int) Math.round(baseX), (int) Math.round(baseY));
+
+        Path2D.Double coreHead = new Path2D.Double();
+        coreHead.moveTo(tipX, tipY);
+        coreHead.lineTo(baseX + perpX * width * 0.56, baseY + perpY * width * 0.56);
+        coreHead.lineTo(baseX - perpX * width * 0.56, baseY - perpY * width * 0.56);
+        coreHead.closePath();
+        g2.fill(coreHead);
+        g2.setStroke(oldStroke);
+    }
+
+    private double lerp(double start, double end, double t) {
+        return start + (end - start) * clamp(t, 0.0, 1.0);
     }
 
     private void drawCreeps(Graphics2D g2) {
