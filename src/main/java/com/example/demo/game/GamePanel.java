@@ -54,6 +54,9 @@ import java.awt.event.MouseMotionListener;
 public class GamePanel extends JPanel implements KeyListener, MouseMotionListener, MouseListener {
     private static final double ZOOM = 2.0;
     private static final double HERO_RENDER_SCALE = 1.18;
+    private static final double EXPERIENCE_ORB_LIFETIME = 15.0;
+    private static final double EXPERIENCE_MAGNET_RADIUS = 140.0;
+    private static final double EXPERIENCE_PICKUP_RADIUS = 38.0;
 
     private final Random random = new Random();
 
@@ -265,22 +268,28 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
 
     private void initNeutralCreeps() {
         for (Point camp : MapLayout.neutralCampTiles()) {
+            double campX = map.tileCenter(camp.x);
+            double campY = map.tileCenter(camp.y);
             for (int i = 0; i < 2; i++) {
                 Creep c = new Creep();
                 c.team = Team.NEUTRAL;
                 c.role = CreepRole.NEUTRAL;
                 c.lane = null;
-                c.x = map.tileCenter(camp.x) + random.nextDouble() * 26.0 - 13.0;
-                c.y = map.tileCenter(camp.y) + random.nextDouble() * 26.0 - 13.0;
+                c.x = campX + random.nextDouble() * 26.0 - 13.0;
+                c.y = campY + random.nextDouble() * 26.0 - 13.0;
                 c.radius = 11;
                 c.maxHp = 90;
                 c.hp = c.maxHp;
                 c.damage = 8;
                 c.defense = 1;
-                c.moveSpeed = 0;
+                c.moveSpeed = 54;
                 c.attackRange = 34;
                 c.attackCooldown = 1.1;
                 c.attackTimer = random.nextDouble() * 0.8;
+                c.homeX = campX;
+                c.homeY = campY;
+                c.leashRadius = 68.0;
+                c.aggroRadius = 84.0;
                 c.lookAngle = random.nextDouble() * Math.PI * 2.0;
                 neutralCreeps.add(c);
             }
@@ -503,13 +512,13 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
 
         for (Creep creep : laneCreeps) {
             if (isHostileCreep(creep) && inMeleeArc(creep.x, creep.y, weapon.meleeRange() + creep.radius, arcHalf)) {
-                damageCreep(creep, weapon.damage());
+                damageCreepByHero(creep, weapon.damage());
             }
         }
 
         for (Creep creep : neutralCreeps) {
             if (isHostileCreep(creep) && inMeleeArc(creep.x, creep.y, weapon.meleeRange() + creep.radius, arcHalf)) {
-                damageCreep(creep, weapon.damage());
+                damageCreepByHero(creep, weapon.damage());
             }
         }
 
@@ -553,7 +562,7 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
                     continue;
                 }
                 if (distance(bullet.x, bullet.y, creep.x, creep.y) <= bullet.radius + creep.radius) {
-                    damageCreep(creep, bullet.damage);
+                    damageCreepByHero(creep, bullet.damage);
                     hit = true;
                     break;
                 }
@@ -565,7 +574,7 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
                         continue;
                     }
                     if (distance(bullet.x, bullet.y, creep.x, creep.y) <= bullet.radius + creep.radius) {
-                        damageCreep(creep, bullet.damage);
+                        damageCreepByHero(creep, bullet.damage);
                         hit = true;
                         break;
                     }
@@ -597,7 +606,7 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
             Creep creep = it.next();
 
             if (creep.hp <= 0) {
-                spawnExperienceOrbs(creep.x, creep.y, 8 + random.nextInt(4));
+                handleCreepDeathRewards(creep, 8 + random.nextInt(4));
                 it.remove();
                 continue;
             }
@@ -638,7 +647,7 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
         }
 
         if (creep.attackTimer <= 0.0) {
-            damageCreep(target, creep.damage);
+            damageCreepByCreep(target, creep.damage);
             creep.attackTimer = creep.attackCooldown;
             triggerUnitAttackAnimation(creep, target.x, target.y);
         }
@@ -718,7 +727,7 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
             Creep creep = it.next();
 
             if (creep.hp <= 0) {
-                spawnExperienceOrbs(creep.x, creep.y, 14 + random.nextInt(6));
+                handleCreepDeathRewards(creep, 14 + random.nextInt(6));
                 it.remove();
                 continue;
             }
@@ -726,21 +735,31 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
             creep.attackTimer = Math.max(0.0, creep.attackTimer - dt);
             creep.attackAnimationTimer = Math.max(0.0, creep.attackAnimationTimer - dt);
 
-            Creep targetLaneCreep = findNearestLaneCreepAround(creep.x, creep.y, 92.0);
-            double heroDist = gameOver ? Double.MAX_VALUE : distance(creep.x, creep.y, player.x, player.y);
+            double distToHome = distance(creep.x, creep.y, creep.homeX, creep.homeY);
+            if (distToHome > creep.leashRadius) {
+                moveTowards(creep, creep.homeX, creep.homeY, creep.moveSpeed * dt);
+                updateCreepAnimation(creep, dt);
+                continue;
+            }
 
-            if (targetLaneCreep != null && distance(creep.x, creep.y, targetLaneCreep.x, targetLaneCreep.y) <= creep.attackRange + targetLaneCreep.radius) {
-                if (creep.attackTimer <= 0.0) {
-                    damageCreep(targetLaneCreep, creep.damage);
-                    creep.attackTimer = creep.attackCooldown;
-                    triggerUnitAttackAnimation(creep, targetLaneCreep.x, targetLaneCreep.y);
-                }
-            } else if (heroDist <= creep.attackRange + player.radius) {
-                if (creep.attackTimer <= 0.0) {
-                    damagePlayer(creep.damage);
-                    creep.attackTimer = creep.attackCooldown;
-                    triggerUnitAttackAnimation(creep, player.x, player.y);
-                }
+            boolean heroNearCamp = !gameOver && distance(player.x, player.y, creep.homeX, creep.homeY) <= creep.aggroRadius;
+            if (heroNearCamp) {
+                engageHeroTarget(creep, dt);
+                updateCreepAnimation(creep, dt);
+                continue;
+            }
+
+            Creep targetLaneCreep = findNearestLaneCreepAround(creep.homeX, creep.homeY, creep.aggroRadius);
+            if (targetLaneCreep != null) {
+                engageCreepTarget(creep, targetLaneCreep, dt);
+                updateCreepAnimation(creep, dt);
+                continue;
+            }
+
+            if (distToHome > 6.0) {
+                moveTowards(creep, creep.homeX, creep.homeY, creep.moveSpeed * dt);
+            } else {
+                creep.moving = false;
             }
 
             updateCreepAnimation(creep, dt);
@@ -780,7 +799,7 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
 
             int picked = random.nextInt(totalTargets);
             if (picked < candidates.size()) {
-                damageCreep(candidates.get(picked), structure.damage);
+                damageCreepByStructure(candidates.get(picked), structure.damage);
             } else {
                 damagePlayer(structure.damage);
             }
@@ -833,7 +852,21 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
                 && findNearestLaneCreepByTeam(player.x, player.y, 96.0, heroTeam) == null;
     }
 
-    private void damageCreep(Creep creep, int damage) {
+    private void damageCreepByHero(Creep creep, int damage) {
+        creep.lastHitByHero = true;
+        creep.lastHitByCreep = false;
+        damageEntity(creep, damage);
+    }
+
+    private void damageCreepByCreep(Creep creep, int damage) {
+        creep.lastHitByHero = false;
+        creep.lastHitByCreep = true;
+        damageEntity(creep, damage);
+    }
+
+    private void damageCreepByStructure(Creep creep, int damage) {
+        creep.lastHitByHero = false;
+        creep.lastHitByCreep = false;
         damageEntity(creep, damage);
     }
 
@@ -853,7 +886,22 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
         entity.applyDamage(damage);
     }
 
-    private void spawnExperienceOrbs(double x, double y, int totalXp) {
+    private void handleCreepDeathRewards(Creep creep, int totalXp) {
+        if (creep.lastHitByHero) {
+            spawnExperienceOrbs(creep.x, creep.y, totalXp, true);
+            return;
+        }
+
+        if (creep.lastHitByCreep) {
+            spawnExperienceOrbs(creep.x, creep.y, Math.max(1, totalXp / 2), false);
+        }
+    }
+
+    private void spawnExperienceOrbs(double x, double y, int totalXp, boolean globalMagnet) {
+        if (totalXp <= 0) {
+            return;
+        }
+
         int orbCount = 2 + random.nextInt(2);
 
         for (int i = 0; i < orbCount; i++) {
@@ -863,6 +911,8 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
             orb.radius = 3.8 + random.nextDouble() * 1.2;
             orb.value = Math.max(1, totalXp / orbCount + random.nextInt(2));
             orb.phase = random.nextDouble() * Math.PI * 2.0;
+            orb.lifetime = EXPERIENCE_ORB_LIFETIME;
+            orb.globalMagnet = globalMagnet;
             experienceOrbs.add(orb);
         }
     }
@@ -872,6 +922,11 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
         while (it.hasNext()) {
             ExperienceOrb orb = it.next();
             orb.phase += dt * 6.0;
+            orb.lifetime -= dt;
+            if (orb.lifetime <= 0.0) {
+                it.remove();
+                continue;
+            }
 
             if (gameOver) {
                 continue;
@@ -881,15 +936,19 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
             double dy = player.y - orb.y;
             double dist = Math.hypot(dx, dy);
 
-            double magnetRadius = 140.0;
-            if (dist < magnetRadius && dist > 0.001) {
-                double factor = 1.0 - dist / magnetRadius;
-                double speed = 40.0 + factor * 210.0;
+            if (dist > 0.001 && (orb.globalMagnet || dist < EXPERIENCE_MAGNET_RADIUS)) {
+                double speed;
+                if (orb.globalMagnet) {
+                    speed = 180.0 + Math.min(260.0, dist * 0.12);
+                } else {
+                    double factor = 1.0 - dist / EXPERIENCE_MAGNET_RADIUS;
+                    speed = 40.0 + factor * 210.0;
+                }
                 orb.x += dx / dist * speed * dt;
                 orb.y += dy / dist * speed * dt;
             }
 
-            if (dist <= 38.0) {
+            if (dist <= EXPERIENCE_PICKUP_RADIUS) {
                 gainExperience(orb.value);
                 it.remove();
             }

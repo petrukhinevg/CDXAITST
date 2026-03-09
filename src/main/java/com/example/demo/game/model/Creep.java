@@ -18,6 +18,12 @@ public class Creep implements CombatUnit {
     public double attackRange;
     public double attackCooldown;
     public double attackTimer;
+    public double homeX;
+    public double homeY;
+    public double leashRadius;
+    public double aggroRadius;
+    public boolean lastHitByHero;
+    public boolean lastHitByCreep;
 
     public int waypointIndex;
     public boolean moving;

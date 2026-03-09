@@ -6,4 +6,6 @@ public class ExperienceOrb {
     public double radius;
     public int value;
     public double phase;
+    public double lifetime;
+    public boolean globalMagnet;
 }
