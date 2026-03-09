@@ -1288,8 +1288,9 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
         int px = worldToScreenX(player.x);
         int py = worldToScreenY(player.y);
 
-        BufferedImage sprite = sprites.getPlayerFrame(player.state, player.animPhase);
-        drawTintedSpriteWithFacing(g2, sprite, px, py, player.aimAngle, HERO_RENDER_SCALE, playerTint());
+        BufferedImage sprite = customizePlayerSprite(sprites.getPlayerFrame(player.state, player.animPhase));
+        drawTintedSpriteWithFacing(g2, sprite, px, py, player.aimAngle, HERO_RENDER_SCALE, null);
+        drawPlayerHelmet(g2, px, py);
 
         if (player.state != AnimationState.DEAD) {
             drawHeldWeapon(g2, px, py);
@@ -1334,15 +1335,42 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
 
         switch (currentWeapon) {
             case SWORD -> {
-                int swordLen = (int) Math.round(18 * ZOOM);
-                int swordX2 = (int) (px + Math.cos(player.aimAngle) * swordLen);
-                int swordY2 = (int) (py + Math.sin(player.aimAngle) * swordLen);
-                g2.setColor(new Color(175, 182, 189));
+                double dirX = Math.cos(player.aimAngle);
+                double dirY = Math.sin(player.aimAngle);
+                double perpX = -dirY;
+                double perpY = dirX;
+
+                int pommelX = (int) Math.round(handX - dirX * 5 * ZOOM);
+                int pommelY = (int) Math.round(handY - dirY * 5 * ZOOM);
+                int tipX = (int) Math.round(handX + dirX * 18 * ZOOM);
+                int tipY = (int) Math.round(handY + dirY * 18 * ZOOM);
+                int guardHalf = (int) Math.round(3.5 * ZOOM);
+
+                g2.setColor(new Color(110, 72, 46));
+                g2.setStroke(new BasicStroke((float) (2.6f * ZOOM / 2.0), BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+                g2.drawLine(pommelX, pommelY, handX, handY);
+
+                g2.setColor(new Color(186, 192, 198));
                 g2.setStroke(new BasicStroke((float) (3.2f * ZOOM / 2.0)));
-                g2.drawLine(px, py, swordX2, swordY2);
-                g2.setColor(new Color(108, 70, 48));
-                g2.setStroke(new BasicStroke((float) (1.9f * ZOOM / 2.0)));
-                g2.drawLine(px - 2, py - 2, px + 2, py + 2);
+                g2.drawLine(handX, handY, tipX, tipY);
+
+                g2.setColor(new Color(96, 104, 112));
+                g2.setStroke(new BasicStroke((float) (1.8f * ZOOM / 2.0), BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+                g2.drawLine(
+                        (int) Math.round(handX - perpX * guardHalf),
+                        (int) Math.round(handY - perpY * guardHalf),
+                        (int) Math.round(handX + perpX * guardHalf),
+                        (int) Math.round(handY + perpY * guardHalf)
+                );
+
+                g2.setColor(new Color(230, 235, 238, 170));
+                g2.setStroke(new BasicStroke((float) (1.1f * ZOOM / 2.0), BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+                g2.drawLine(
+                        (int) Math.round(handX + dirX * 2 * ZOOM - perpX),
+                        (int) Math.round(handY + dirY * 2 * ZOOM - perpY),
+                        (int) Math.round(tipX - perpX * 1.2),
+                        (int) Math.round(tipY - perpY * 1.2)
+                );
 
                 if (swordSwingTime > 0.0) {
                     drawSwordAttackArea(g2, px, py);
@@ -1414,6 +1442,42 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
         }
     }
 
+    private BufferedImage customizePlayerSprite(BufferedImage sprite) {
+        PlayerPalette palette = playerPalette();
+        BufferedImage customized = new BufferedImage(sprite.getWidth(), sprite.getHeight(), BufferedImage.TYPE_INT_ARGB);
+
+        for (int y = 0; y < sprite.getHeight(); y++) {
+            for (int x = 0; x < sprite.getWidth(); x++) {
+                int argb = sprite.getRGB(x, y);
+                customized.setRGB(x, y, remapPlayerSpriteColor(argb, palette));
+            }
+        }
+
+        return customized;
+    }
+
+    private int remapPlayerSpriteColor(int argb, PlayerPalette palette) {
+        int alpha = (argb >>> 24) & 0xFF;
+        if (alpha == 0) {
+            return argb;
+        }
+
+        if (isCloseColor(argb, 255, 220, 110, 28) || isCloseColor(argb, 220, 255, 110, 40)) {
+            return 0x00000000;
+        }
+        if (isCloseColor(argb, 52, 126, 226, 14)) {
+            return withAlpha(palette.primary(), alpha);
+        }
+        if (isCloseColor(argb, 30, 76, 152, 14)) {
+            return withAlpha(palette.shadow(), alpha);
+        }
+        if (isCloseColor(argb, 43, 66, 104, 16)) {
+            return withAlpha(palette.darkCloth(), alpha);
+        }
+
+        return argb;
+    }
+
     private BufferedImage tintedSprite(BufferedImage sprite, Color tint) {
         BufferedImage tinted = new BufferedImage(sprite.getWidth(), sprite.getHeight(), BufferedImage.TYPE_INT_ARGB);
         Graphics2D tg = tinted.createGraphics();
@@ -1427,12 +1491,72 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
         return tinted;
     }
 
-    private Color playerTint() {
+    private void drawPlayerHelmet(Graphics2D g2, int px, int py) {
+        PlayerPalette palette = playerPalette();
+        int helmetW = (int) Math.round(16 * ZOOM * HERO_RENDER_SCALE);
+        int helmetH = (int) Math.round(9 * ZOOM * HERO_RENDER_SCALE);
+        int helmetX = px - helmetW / 2;
+        int helmetY = py - (int) Math.round(17 * ZOOM);
+
+        g2.setColor(new Color(0, 0, 0, 60));
+        g2.fillOval(helmetX + 2, helmetY + 4, helmetW - 4, helmetH);
+
+        g2.setColor(palette.helmetShadow());
+        g2.fillRoundRect(helmetX, helmetY + helmetH / 2 - 1, helmetW, helmetH / 2 + 3, 8, 8);
+        g2.fillArc(helmetX, helmetY - 1, helmetW, helmetH + 6, 0, 180);
+
+        g2.setColor(palette.helmetMain());
+        g2.fillRoundRect(helmetX + 1, helmetY + helmetH / 2, helmetW - 2, helmetH / 2 + 1, 7, 7);
+        g2.fillArc(helmetX + 1, helmetY, helmetW - 2, helmetH + 4, 0, 180);
+
+        g2.setColor(new Color(232, 236, 240, 150));
+        g2.setStroke(new BasicStroke(1.1f));
+        g2.drawArc(helmetX + 2, helmetY + 1, helmetW - 5, helmetH + 1, 12, 88);
+
+        g2.setColor(palette.shadow());
+        g2.fillRect(px - 1, helmetY + helmetH / 2 + 1, 3, helmetH / 2 + 3);
+    }
+
+    private PlayerPalette playerPalette() {
         return switch (currentWeapon) {
-            case BOW -> new Color(88, 170, 88);
-            case SWORD -> new Color(152, 152, 152);
-            case STONE -> new Color(132, 98, 68);
+            case BOW -> new PlayerPalette(
+                    new Color(72, 156, 86),
+                    new Color(38, 98, 52),
+                    new Color(34, 58, 39),
+                    new Color(156, 164, 172),
+                    new Color(94, 102, 112)
+            );
+            case SWORD -> new PlayerPalette(
+                    new Color(148, 154, 161),
+                    new Color(95, 101, 109),
+                    new Color(58, 63, 70),
+                    new Color(174, 179, 186),
+                    new Color(108, 114, 122)
+            );
+            case STONE -> new PlayerPalette(
+                    new Color(136, 98, 66),
+                    new Color(88, 60, 40),
+                    new Color(56, 40, 28),
+                    new Color(147, 124, 103),
+                    new Color(94, 76, 61)
+            );
         };
+    }
+
+    private int withAlpha(Color color, int alpha) {
+        return (alpha << 24)
+                | (color.getRed() << 16)
+                | (color.getGreen() << 8)
+                | color.getBlue();
+    }
+
+    private boolean isCloseColor(int argb, int red, int green, int blue, int tolerance) {
+        int r = (argb >> 16) & 0xFF;
+        int g = (argb >> 8) & 0xFF;
+        int b = argb & 0xFF;
+        return Math.abs(r - red) <= tolerance
+                && Math.abs(g - green) <= tolerance
+                && Math.abs(b - blue) <= tolerance;
     }
 
     private void drawSwordAttackArea(Graphics2D g2, int px, int py) {
@@ -1475,6 +1599,9 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
         g2.setStroke(new BasicStroke((float) (2.2f * ZOOM / 2.0)));
         int startDeg = (int) Math.round(Math.toDegrees(start));
         g2.drawArc(px - outerR, py - outerR, outerR * 2, outerR * 2, -startDeg, (int) currentWeapon.meleeArcDegrees());
+    }
+
+    private record PlayerPalette(Color primary, Color shadow, Color darkCloth, Color helmetMain, Color helmetShadow) {
     }
 
     private void drawBullets(Graphics2D g2) {
