@@ -1299,29 +1299,29 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
             creep.laneRepathCooldown = Math.max(0.0, creep.laneRepathCooldown - dt);
 
             LaneGuidance guidance = laneGuidance.get(creep);
-            Creep enemyCreep = findNearestEnemyLaneCreep(creep, laneCreepAggroRadius(creep));
-            if (enemyCreep != null) {
-                engageCreepTarget(creep, enemyCreep, guidance, dt);
-                updateCreepAnimation(creep, dt);
-                continue;
-            }
+            Structure laneObjective = findLaneTargetStructure(creep);
+            if (laneObjective != null && isWithinLaneObjectiveZone(creep, laneObjective)) {
+                Player defendingHero = findLaneHeroTarget(creep, laneObjective);
+                if (defendingHero != null) {
+                    engageHeroTarget(creep, defendingHero, guidance, dt);
+                    updateCreepAnimation(creep, dt);
+                    continue;
+                }
 
-            Player heroTarget = findLaneHeroTarget(creep);
-            if (heroTarget != null) {
-                engageHeroTarget(creep, heroTarget, guidance, dt);
-                updateCreepAnimation(creep, dt);
-                continue;
-            }
-
-            Structure enemyStructure = findLaneTargetStructure(creep);
-            if (enemyStructure != null && enemyStructure.hp > 0
-                    && distance(creep.x, creep.y, enemyStructure.x, enemyStructure.y) < laneStructureAggroRadius(creep, enemyStructure)) {
-                if (enemyStructure.type == StructureType.TOWER && !canCommitToTowerAttack(creep, enemyStructure)) {
+                if (laneObjective.type == StructureType.TOWER && !canCommitToTowerAttack(creep, laneObjective)) {
                     moveAlongLane(creep, guidance, dt);
                     updateCreepAnimation(creep, dt);
                     continue;
                 }
-                engageStructureTarget(creep, enemyStructure, guidance, dt);
+
+                engageStructureTarget(creep, laneObjective, guidance, dt);
+                updateCreepAnimation(creep, dt);
+                continue;
+            }
+
+            Creep enemyCreep = findNearestEnemyLaneCreep(creep, laneCreepAggroRadius(creep));
+            if (enemyCreep != null) {
+                engageCreepTarget(creep, enemyCreep, guidance, dt);
                 updateCreepAnimation(creep, dt);
                 continue;
             }
@@ -1335,7 +1335,7 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
         double dist = distance(creep.x, creep.y, target.x, target.y);
         if (dist > creep.attackRange + target.radius) {
             Point2D.Double approachPoint = findCombatApproachPoint(creep, target, creep.attackRange, CREEP_COMBAT_SLOT_ARC);
-            steerCreepTowards(
+            advanceCreepTowards(
                     creep,
                     approachPoint != null ? approachPoint.x : target.x,
                     approachPoint != null ? approachPoint.y : target.y,
@@ -1362,7 +1362,7 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
         if (dist > creep.attackRange + target.radius) {
             Point2D.Double approachPoint = findCombatApproachPoint(creep, target, creep.attackRange, CREEP_STRUCTURE_SLOT_ARC);
             if (approachPoint != null) {
-                steerCreepTowards(
+                advanceCreepTowards(
                         creep,
                         approachPoint.x,
                         approachPoint.y,
@@ -1387,7 +1387,7 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
         double dist = distance(creep.x, creep.y, hero.x, hero.y);
         if (dist > creep.attackRange + hero.radius) {
             Point2D.Double approachPoint = findCombatApproachPoint(creep, hero, creep.attackRange, CREEP_COMBAT_SLOT_ARC);
-            steerCreepTowards(
+            advanceCreepTowards(
                     creep,
                     approachPoint != null ? approachPoint.x : hero.x,
                     approachPoint != null ? approachPoint.y : hero.y,
@@ -1414,7 +1414,7 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
             creep.moving = false;
             return;
         }
-        steerCreepTowards(creep, guidance.targetX(), guidance.targetY(), guidance.dirX(), guidance.dirY(), dt);
+        advanceCreepTowards(creep, guidance.targetX(), guidance.targetY(), guidance.dirX(), guidance.dirY(), dt);
     }
 
     private void moveTowards(Creep creep, double tx, double ty, double distanceStep) {
@@ -1470,6 +1470,10 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
                 if (path == null || path.size() < 2) {
                     continue;
                 }
+                Structure laneObjective = findLaneTargetStructure(team, lane);
+                double objectiveStopProgress = laneObjective == null
+                        ? Double.POSITIVE_INFINITY
+                        : laneObjectiveStopProgress(path, laneObjective);
 
                 List<CreepLaneProgress> group = new ArrayList<>();
                 for (Creep creep : laneCreeps) {
@@ -1483,7 +1487,7 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
 
                 group.sort((left, right) -> Double.compare(right.sample().progress(), left.sample().progress()));
                 double frontProgress = Math.min(
-                        group.get(0).sample().totalLength(),
+                        Math.min(group.get(0).sample().totalLength(), objectiveStopProgress),
                         group.get(0).sample().progress() + CREEP_LANE_LOOKAHEAD
                 );
                 for (int index = 0; index < group.size(); index++) {
@@ -1495,7 +1499,9 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
                             frontProgress - row * rowSpacing
                     );
                     double minProgress = Math.max(0.0, creepProgress.sample().progress() - STANDARD_UNIT_RADIUS * 0.35);
-                    targetProgress = clamp(targetProgress, minProgress, creepProgress.sample().totalLength());
+                    double maxProgress = Math.min(creepProgress.sample().totalLength(), objectiveStopProgress);
+                    maxProgress = Math.max(minProgress, maxProgress);
+                    targetProgress = clamp(targetProgress, minProgress, maxProgress);
 
                     LaneAnchor anchor = laneAnchorAtProgress(path, targetProgress);
                     Point2D.Double formationTarget = projectLaneOffsetPoint(
@@ -1635,13 +1641,22 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
         return null;
     }
 
-    private void steerCreepTowards(Creep creep, double targetX, double targetY, double laneDirX, double laneDirY, double dt) {
+    private boolean advanceCreepTowards(Creep creep, double targetX, double targetY, double laneDirX, double laneDirY, double dt) {
+        if (steerCreepTowards(creep, targetX, targetY, laneDirX, laneDirY, dt)) {
+            clearCreepLanePath(creep);
+            return true;
+        }
+
+        return navigateCreepAroundObstacle(creep, targetX, targetY, dt);
+    }
+
+    private boolean steerCreepTowards(Creep creep, double targetX, double targetY, double laneDirX, double laneDirY, double dt) {
         double desiredX = targetX - creep.x;
         double desiredY = targetY - creep.y;
         double desiredLength = Math.hypot(desiredX, desiredY);
         if (desiredLength < 0.001) {
             creep.moving = false;
-            return;
+            return false;
         }
 
         double desiredNX = desiredX / desiredLength;
@@ -1707,6 +1722,42 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
         double step = Math.min(creep.moveSpeed * dt, desiredLength);
         creep.lookAngle = Math.atan2(steerY, steerX);
         creep.moving = moveCombatUnit(creep, steerX / steerLength * step, steerY / steerLength * step);
+        return creep.moving;
+    }
+
+    private boolean navigateCreepAroundObstacle(Creep creep, double targetX, double targetY, double dt) {
+        Point goalTile = findNearestWalkableLaneTileForCreep(creep, targetX, targetY);
+        if (goalTile == null) {
+            creep.moving = false;
+            clearCreepLanePath(creep);
+            return false;
+        }
+
+        int goalIndex = tileIndex(goalTile.x, goalTile.y);
+        if (creep.laneNavigationGoalIndex != goalIndex || creep.laneNavigationPath.isEmpty()) {
+            if (creep.laneRepathCooldown <= 0.0) {
+                rebuildCreepLanePath(creep, goalTile);
+            }
+        }
+
+        while (!creep.laneNavigationPath.isEmpty()) {
+            Point waypoint = creep.laneNavigationPath.get(0);
+            double waypointX = map.tileCenter(waypoint.x);
+            double waypointY = map.tileCenter(waypoint.y);
+            if (distance(creep.x, creep.y, waypointX, waypointY) <= CREEP_WAYPOINT_REACHED_DISTANCE) {
+                creep.laneNavigationPath.remove(0);
+                continue;
+            }
+
+            moveTowards(creep, waypointX, waypointY, creep.moveSpeed * dt);
+            if (distance(creep.x, creep.y, waypointX, waypointY) <= CREEP_WAYPOINT_REACHED_DISTANCE) {
+                creep.laneNavigationPath.remove(0);
+            }
+            return creep.moving;
+        }
+
+        creep.moving = false;
+        return false;
     }
 
     private Point2D.Double findCombatApproachPoint(Creep creep, CombatEntity target, double desiredRange, double slotArc) {
@@ -1773,7 +1824,7 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
         );
 
         creep.laneNavigationPath.clear();
-        creep.laneNavigationGoalIndex = creep.waypointIndex;
+        creep.laneNavigationGoalIndex = tileIndex(goalTile.x, goalTile.y);
         creep.laneRepathCooldown = CREEP_PATH_REBUILD_INTERVAL;
         if (path == null) {
             return;
@@ -1814,6 +1865,27 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
             return false;
         }
         return canOccupy(creep, map.tileCenter(tileX), map.tileCenter(tileY));
+    }
+
+    private Point findNearestWalkableLaneTileForCreep(Creep creep, double worldX, double worldY) {
+        Point best = null;
+        double bestDistance = Double.MAX_VALUE;
+
+        for (int ty = 0; ty < map.getHeight(); ty++) {
+            for (int tx = 0; tx < map.getWidth(); tx++) {
+                if (!isLaneTileWalkableForCreep(creep, tx, ty)) {
+                    continue;
+                }
+
+                double dist = distance(worldX, worldY, map.tileCenter(tx), map.tileCenter(ty));
+                if (dist < bestDistance) {
+                    bestDistance = dist;
+                    best = new Point(tx, ty);
+                }
+            }
+        }
+
+        return best;
     }
 
     private void updateNeutralCreeps(double dt) {
@@ -2069,16 +2141,27 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
         return creep.deathAnimationTimer <= 0.0;
     }
 
-    private Player findLaneHeroTarget(Creep creep) {
-        if (gameOver) {
+    private Player findLaneHeroTarget(Creep creep, Structure laneObjective) {
+        if (gameOver || laneObjective == null || !isWithinLaneObjectiveZone(creep, laneObjective)) {
             return null;
         }
 
-        Player hero = findNearestHeroByTeam(creep.x, creep.y, laneHeroAggroRadius(creep), creep.team.opposite());
+        Player hero = findNearestHeroByTeam(
+                laneObjective.x,
+                laneObjective.y,
+                laneObjective.attackRange,
+                creep.team.opposite()
+        );
         if (hero == null) {
             return null;
         }
-        return findNearestLaneCreepByTeam(hero.x, hero.y, 96.0, hero.team) == null ? hero : null;
+        if (distance(creep.x, creep.y, hero.x, hero.y) > laneHeroAggroRadius(creep)) {
+            return null;
+        }
+        if (isLaneHeroBeyondObjective(creep, hero, laneObjective)) {
+            return null;
+        }
+        return hero;
     }
 
     private double laneCreepAggroRadius(Creep creep) {
@@ -2091,6 +2174,29 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
 
     private double laneStructureAggroRadius(Creep creep, Structure structure) {
         return Math.max(180.0, creep.attackRange + structure.radius + 24.0);
+    }
+
+    private boolean isWithinLaneObjectiveZone(Creep creep, Structure laneObjective) {
+        return laneObjective != null
+                && laneObjective.hp > 0
+                && distance(creep.x, creep.y, laneObjective.x, laneObjective.y) <= laneStructureAggroRadius(creep, laneObjective);
+    }
+
+    private boolean isLaneHeroBeyondObjective(Creep creep, Player hero, Structure laneObjective) {
+        List<Point> path = lanePaths.get(creep.team).get(creep.lane);
+        if (path == null || path.size() < 2) {
+            return false;
+        }
+
+        double heroProgress = sampleLaneProgress(hero.x, hero.y, path).progress();
+        double objectiveProgress = sampleLaneProgress(laneObjective.x, laneObjective.y, path).progress();
+        return heroProgress > objectiveProgress + STANDARD_UNIT_RADIUS;
+    }
+
+    private double laneObjectiveStopProgress(List<Point> path, Structure laneObjective) {
+        double objectiveProgress = sampleLaneProgress(laneObjective.x, laneObjective.y, path).progress();
+        double stopBuffer = laneObjective.radius + STANDARD_UNIT_RADIUS * 1.35;
+        return Math.max(0.0, objectiveProgress - stopBuffer);
     }
 
     private double structureAttackProgress(Structure structure) {
@@ -2354,25 +2460,25 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
     }
 
     private Structure findLaneTargetStructure(Creep creep) {
-        Team enemyTeam = creep.team.opposite();
+        return findLaneTargetStructure(creep.team, creep.lane);
+    }
 
-        Structure laneTower = structures.stream()
-                .filter(s -> s.hp > 0)
-                .filter(s -> s.team == enemyTeam)
-                .filter(s -> s.type == StructureType.TOWER && s.lane == creep.lane)
-                .min(Comparator.comparingDouble(s -> distance(creep.x, creep.y, s.x, s.y)))
-                .orElse(null);
-
-        if (laneTower != null) {
-            return laneTower;
-        }
+    private Structure findLaneTargetStructure(Team team, LaneType lane) {
+        Team enemyTeam = team.opposite();
 
         return structures.stream()
                 .filter(s -> s.hp > 0)
                 .filter(s -> s.team == enemyTeam)
-                .filter(s -> s.type == StructureType.THRONE)
-                .findFirst()
+                .filter(s -> (s.type == StructureType.TOWER && s.lane == lane) || s.type == StructureType.THRONE)
+                .min(Comparator.comparingInt(this::laneObjectivePriority))
                 .orElse(null);
+    }
+
+    private int laneObjectivePriority(Structure structure) {
+        if (structure.type == StructureType.TOWER) {
+            return structure.laneOrder;
+        }
+        return Integer.MAX_VALUE;
     }
 
     private Creep findNearestLaneCreepAround(double x, double y, double radius) {
@@ -2381,25 +2487,6 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
 
         for (Creep creep : laneCreeps) {
             if (creep.hp <= 0) {
-                continue;
-            }
-
-            double dist = distance(x, y, creep.x, creep.y);
-            if (dist < radius && dist < best) {
-                best = dist;
-                bestCreep = creep;
-            }
-        }
-
-        return bestCreep;
-    }
-
-    private Creep findNearestLaneCreepByTeam(double x, double y, double radius, Team team) {
-        Creep bestCreep = null;
-        double best = Double.MAX_VALUE;
-
-        for (Creep creep : laneCreeps) {
-            if (creep.hp <= 0 || creep.team != team) {
                 continue;
             }
 
