@@ -42,6 +42,7 @@ import java.awt.Font;
 import java.awt.Graphics;
 import java.awt.Graphics2D;
 import java.awt.GraphicsEnvironment;
+import java.awt.Polygon;
 import java.awt.Rectangle;
 import java.awt.AlphaComposite;
 import java.awt.Composite;
@@ -3614,21 +3615,25 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
 
         int sx = worldToScreenX(creep.x);
         int sy = worldToScreenY(creep.y);
+        int renderSy = sy + (int) Math.round(laneCreepVisualYOffset(creep));
         int r = (int) Math.round(creep.radius * ZOOM);
-        BufferedImage sprite = sprites.getPlayerFrame(creep.state, creep.animPhase);
-        drawTintedSpriteWithFacing(g2, sprite, sx, sy, creep.lookAngle, creepRenderScale(creep), creepTint(creep));
+        if (creep.role == CreepRole.LANE) {
+            drawLaneCreepVisual(g2, creep, sx, renderSy, r);
+        } else {
+            BufferedImage sprite = sprites.getPlayerFrame(creep.state, creep.animPhase);
+            drawTintedSpriteWithFacing(g2, sprite, sx, sy, creep.lookAngle, creepRenderScale(creep), creepTint(creep));
+        }
 
         if (creep.state == AnimationState.ATTACK) {
             g2.setColor(creep.team == Team.LIGHT
                     ? new Color(102, 232, 118, 110)
                     : new Color(255, 118, 92, 110));
-            g2.fillOval(sx - r - 4, sy - r - 4, r * 2 + 8, r * 2 + 8);
+            g2.fillOval(sx - r - 4, renderSy - r - 4, r * 2 + 8, r * 2 + 8);
         }
 
-        drawLaneCreepAttackEffect(g2, creep, sx, sy, r);
-        drawLaneCreepTypeMarker(g2, creep, sx, sy, r);
+        drawLaneCreepAttackEffect(g2, creep, sx, renderSy, r);
 
-        drawHealthBar(g2, sx, sy - r - 10, 28, 5,
+        drawHealthBar(g2, sx, renderSy - r - 10, 28, 5,
                 (double) creep.hp / creep.maxHp,
                 creep.team == Team.LIGHT ? new Color(76, 214, 104) : new Color(241, 94, 85));
     }
@@ -3657,25 +3662,314 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
         };
     }
 
-    private void drawLaneCreepTypeMarker(Graphics2D g2, Creep creep, int sx, int sy, int radius) {
+    private double laneCreepVisualYOffset(Creep creep) {
         if (creep.role != CreepRole.LANE) {
-            return;
+            return 0.0;
         }
+        return switch (creep.laneType) {
+            case MELEE -> 0.0;
+            case RANGED -> -2.5 - Math.abs(Math.sin(creep.animPhase * 0.55)) * 3.0;
+            case CATAPULT -> -1.2 - Math.abs(Math.sin(creep.animPhase * 0.45)) * 1.8;
+        };
+    }
 
-        switch (creep.laneType) {
-            case MELEE -> {
-            }
-            case RANGED -> {
-                g2.setColor(new Color(245, 221, 132, 210));
-                g2.fillOval(sx + radius - 6, sy - radius - 2, 6, 6);
-            }
-            case CATAPULT -> {
-                g2.setColor(new Color(86, 70, 44, 180));
-                g2.fillRoundRect(sx - radius, sy + radius - 6, radius * 2, 5, 4, 4);
-                g2.setColor(new Color(216, 189, 116, 220));
-                g2.fillRoundRect(sx - 6, sy - radius - 4, 12, 5, 4, 4);
+    private void drawLaneCreepVisual(Graphics2D g2, Creep creep, int sx, int sy, int radius) {
+        drawLaneCreepShadow(g2, creep, sx, sy, radius);
+
+        Graphics2D cg = (Graphics2D) g2.create();
+        cg.translate(sx, sy);
+        if (Math.cos(creep.lookAngle) < 0.0) {
+            cg.scale(-1.0, 1.0);
+        }
+        double scale = radius / 10.5;
+        cg.scale(scale, scale);
+
+        switch (creep.team) {
+            case LIGHT -> drawLightLaneCreep(cg, creep);
+            case DARK -> drawDarkLaneCreep(cg, creep);
+            case NEUTRAL -> {
+                BufferedImage sprite = sprites.getPlayerFrame(creep.state, creep.animPhase);
+                cg.scale(1.0 / scale, 1.0 / scale);
+                drawTintedSpriteWithFacing(cg, sprite, 0, 0, 0.0, creepRenderScale(creep), new Color(160, 86, 70));
             }
         }
+        cg.dispose();
+    }
+
+    private void drawLaneCreepShadow(Graphics2D g2, Creep creep, int sx, int sy, int radius) {
+        int shadowW = switch (creep.laneType) {
+            case MELEE -> (int) Math.round(radius * 1.45);
+            case RANGED -> (int) Math.round(radius * 1.55);
+            case CATAPULT -> (int) Math.round(radius * 1.8);
+        };
+        int shadowH = switch (creep.laneType) {
+            case MELEE -> Math.max(5, (int) Math.round(radius * 0.42));
+            case RANGED -> Math.max(4, (int) Math.round(radius * 0.34));
+            case CATAPULT -> Math.max(4, (int) Math.round(radius * 0.38));
+        };
+        int shadowY = sy + radius - shadowH / 2 + (creep.laneType == LaneCreepType.MELEE ? 1 : 4);
+        g2.setColor(new Color(10, 12, 18, creep.laneType == LaneCreepType.MELEE ? 70 : 52));
+        g2.fillOval(sx - shadowW / 2, shadowY, shadowW, shadowH);
+    }
+
+    private void drawLightLaneCreep(Graphics2D g2, Creep creep) {
+        switch (creep.laneType) {
+            case MELEE -> drawLightAngelKnight(g2, creep);
+            case RANGED -> drawLightAngelMage(g2, creep);
+            case CATAPULT -> drawLightEye(g2, creep);
+        }
+    }
+
+    private void drawDarkLaneCreep(Graphics2D g2, Creep creep) {
+        switch (creep.laneType) {
+            case MELEE -> drawDarkImpKnight(g2, creep);
+            case RANGED -> drawDarkImpFlier(g2, creep);
+            case CATAPULT -> drawDarkEye(g2, creep);
+        }
+    }
+
+    private void drawLightAngelKnight(Graphics2D g2, Creep creep) {
+        double flap = 1.6 + Math.sin(creep.animPhase * 0.55) * 1.3;
+        drawFeatherWing(g2, true, -5.0, -1.0, flap, new Color(244, 250, 255), new Color(195, 214, 235));
+        drawFeatherWing(g2, false, 5.0, -1.0, flap, new Color(244, 250, 255), new Color(195, 214, 235));
+        drawHalo(g2, new Color(255, 228, 150), new Color(255, 250, 228, 190), 0, -14, 12, 4);
+
+        g2.setColor(new Color(226, 232, 242));
+        g2.fillRoundRect(-5, -2, 10, 11, 4, 4);
+        g2.setColor(new Color(136, 152, 176));
+        g2.drawRoundRect(-5, -2, 10, 11, 4, 4);
+        g2.setColor(new Color(255, 214, 136));
+        g2.fillOval(-4, -10, 8, 8);
+        g2.setColor(new Color(216, 183, 128));
+        g2.drawOval(-4, -10, 8, 8);
+        g2.setColor(new Color(112, 128, 168));
+        g2.fillRect(-2, -5, 4, 1);
+        g2.setColor(new Color(204, 164, 98));
+        g2.fillRoundRect(-7, 0, 3, 8, 2, 2);
+        g2.setColor(new Color(142, 150, 164));
+        g2.fillRoundRect(-2, 8, 3, 6, 2, 2);
+        g2.fillRoundRect(1, 8, 3, 6, 2, 2);
+        g2.setColor(new Color(98, 112, 134));
+        g2.drawRoundRect(-2, 8, 3, 6, 2, 2);
+        g2.drawRoundRect(1, 8, 3, 6, 2, 2);
+
+        Stroke oldStroke = g2.getStroke();
+        g2.setStroke(new BasicStroke(2.0f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+        g2.setColor(new Color(126, 190, 255));
+        g2.drawLine(4, -1, 11, 7);
+        g2.setColor(new Color(228, 244, 255));
+        g2.drawLine(5, -2, 12, 6);
+        g2.setStroke(oldStroke);
+    }
+
+    private void drawLightAngelMage(Graphics2D g2, Creep creep) {
+        double flap = 3.2 + Math.sin(creep.animPhase * 0.7) * 2.1;
+        drawFeatherWing(g2, true, -4.5, -3.0, flap, new Color(249, 246, 234), new Color(220, 206, 172));
+        drawFeatherWing(g2, false, 4.5, -3.0, flap, new Color(249, 246, 234), new Color(220, 206, 172));
+        drawHalo(g2, new Color(255, 224, 150), new Color(255, 245, 214, 190), 0, -15, 12, 4);
+
+        g2.setColor(new Color(246, 242, 224));
+        Path2D.Double robe = new Path2D.Double();
+        robe.moveTo(-4, -3);
+        robe.lineTo(4, -3);
+        robe.lineTo(7, 10);
+        robe.lineTo(-7, 10);
+        robe.closePath();
+        g2.fill(robe);
+        g2.setColor(new Color(190, 170, 118));
+        g2.draw(robe);
+
+        g2.setColor(new Color(255, 223, 162));
+        g2.fillOval(-4, -10, 8, 8);
+        g2.setColor(new Color(214, 186, 134));
+        g2.drawOval(-4, -10, 8, 8);
+        g2.setColor(new Color(176, 154, 92));
+        g2.drawLine(-2, 12, 0, 8);
+        g2.drawLine(2, 12, 0, 8);
+
+        Stroke oldStroke = g2.getStroke();
+        g2.setStroke(new BasicStroke(1.8f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+        g2.setColor(new Color(236, 224, 178));
+        g2.drawLine(2, -1, 8, 5);
+        g2.setColor(new Color(214, 188, 104, 185));
+        g2.fillOval(8, 2, 7, 7);
+        g2.setColor(new Color(255, 247, 214, 220));
+        g2.fillOval(10, 4, 3, 3);
+        g2.setStroke(oldStroke);
+    }
+
+    private void drawLightEye(Graphics2D g2, Creep creep) {
+        double pulse = 1.0 + Math.sin(creep.animPhase * 0.55) * 0.08;
+        g2.scale(pulse, pulse);
+        drawHalo(g2, new Color(255, 228, 156), new Color(255, 246, 222, 175), 0, -12, 16, 5);
+
+        Path2D.Double finLeft = new Path2D.Double();
+        finLeft.moveTo(-10, -2);
+        finLeft.lineTo(-16, -7);
+        finLeft.lineTo(-15, 4);
+        finLeft.closePath();
+        Path2D.Double finRight = new Path2D.Double();
+        finRight.moveTo(10, -2);
+        finRight.lineTo(16, -7);
+        finRight.lineTo(15, 4);
+        finRight.closePath();
+        g2.setColor(new Color(244, 244, 252));
+        g2.fill(finLeft);
+        g2.fill(finRight);
+        g2.setColor(new Color(190, 210, 232));
+        g2.draw(finLeft);
+        g2.draw(finRight);
+
+        g2.setColor(new Color(248, 250, 255));
+        g2.fillOval(-11, -7, 22, 14);
+        g2.setColor(new Color(200, 176, 92));
+        g2.drawOval(-11, -7, 22, 14);
+        g2.setColor(new Color(94, 186, 255));
+        g2.fillOval(-5, -5, 10, 10);
+        g2.setColor(new Color(36, 88, 156));
+        g2.fillOval(-2, -2, 4, 4);
+        g2.setColor(new Color(255, 255, 255, 200));
+        g2.fillOval(1, -4, 3, 3);
+
+        Stroke oldStroke = g2.getStroke();
+        g2.setStroke(new BasicStroke(1.5f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+        g2.setColor(new Color(255, 232, 164, 180));
+        g2.drawLine(-6, -10, -2, -14);
+        g2.drawLine(0, -11, 0, -16);
+        g2.drawLine(6, -10, 2, -14);
+        g2.setStroke(oldStroke);
+    }
+
+    private void drawDarkImpKnight(Graphics2D g2, Creep creep) {
+        g2.setColor(new Color(86, 22, 24));
+        g2.fillOval(-4, -10, 8, 8);
+        g2.setColor(new Color(48, 12, 12));
+        g2.drawOval(-4, -10, 8, 8);
+        drawHorn(g2, true, new Color(96, 58, 34));
+        drawHorn(g2, false, new Color(96, 58, 34));
+
+        g2.setColor(new Color(88, 82, 88));
+        g2.fillRoundRect(-5, -2, 10, 11, 4, 4);
+        g2.setColor(new Color(34, 28, 34));
+        g2.drawRoundRect(-5, -2, 10, 11, 4, 4);
+        g2.setColor(new Color(156, 44, 44));
+        g2.fillRoundRect(-2, 1, 4, 6, 2, 2);
+        g2.setColor(new Color(70, 12, 12));
+        g2.fillRoundRect(-7, 0, 3, 7, 2, 2);
+        g2.setColor(new Color(98, 88, 96));
+        g2.fillRoundRect(-2, 8, 3, 6, 2, 2);
+        g2.fillRoundRect(1, 8, 3, 6, 2, 2);
+
+        Stroke oldStroke = g2.getStroke();
+        g2.setStroke(new BasicStroke(2.0f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+        g2.setColor(new Color(190, 190, 196));
+        g2.drawLine(4, -1, 11, 6);
+        g2.setColor(new Color(82, 64, 48));
+        g2.drawLine(2, 1, 5, 3);
+        g2.setStroke(oldStroke);
+
+        g2.setColor(new Color(100, 22, 26));
+        g2.drawLine(-1, 7, -6, 11);
+        g2.drawLine(-6, 11, -4, 13);
+        g2.drawLine(-6, 11, -7, 8);
+    }
+
+    private void drawDarkImpFlier(Graphics2D g2, Creep creep) {
+        double flap = 3.4 + Math.sin(creep.animPhase * 0.8) * 2.4;
+        drawBatWing(g2, true, -3.0, -2.0, flap, new Color(72, 38, 46), new Color(34, 18, 24));
+        drawBatWing(g2, false, 3.0, -2.0, flap, new Color(72, 38, 46), new Color(34, 18, 24));
+
+        g2.setColor(new Color(120, 28, 34));
+        g2.fillOval(-4, -8, 8, 8);
+        g2.setColor(new Color(64, 14, 18));
+        g2.drawOval(-4, -8, 8, 8);
+        drawHorn(g2, true, new Color(110, 84, 48));
+        drawHorn(g2, false, new Color(110, 84, 48));
+        g2.setColor(new Color(82, 18, 24));
+        g2.fillRoundRect(-3, -1, 6, 9, 4, 4);
+        g2.setColor(new Color(150, 78, 30));
+        g2.fillOval(7, 0, 7, 7);
+        g2.setColor(new Color(255, 196, 96, 220));
+        g2.fillOval(9, 2, 3, 3);
+    }
+
+    private void drawDarkEye(Graphics2D g2, Creep creep) {
+        double pulse = 1.0 + Math.sin(creep.animPhase * 0.5) * 0.1;
+        g2.scale(pulse, pulse);
+
+        Stroke oldStroke = g2.getStroke();
+        g2.setStroke(new BasicStroke(1.3f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+        g2.setColor(new Color(120, 34, 38, 150));
+        g2.drawLine(-12, -8, -17, -12);
+        g2.drawLine(0, -10, 0, -16);
+        g2.drawLine(12, -8, 17, -12);
+        g2.drawLine(-12, 8, -17, 12);
+        g2.drawLine(12, 8, 17, 12);
+        g2.setStroke(oldStroke);
+
+        g2.setColor(new Color(44, 12, 18));
+        g2.fillOval(-12, -8, 24, 16);
+        g2.setColor(new Color(154, 36, 42));
+        g2.drawOval(-12, -8, 24, 16);
+        g2.setColor(new Color(196, 44, 54));
+        g2.fillOval(-6, -5, 12, 10);
+        g2.setColor(new Color(24, 6, 8));
+        g2.fillOval(-2, -2, 4, 4);
+        g2.setColor(new Color(255, 214, 214, 180));
+        g2.fillOval(1, -4, 3, 3);
+    }
+
+    private void drawFeatherWing(Graphics2D g2, boolean left, double anchorX, double anchorY, double spread, Color main, Color shade) {
+        int dir = left ? -1 : 1;
+        Path2D.Double wing = new Path2D.Double();
+        wing.moveTo(anchorX, anchorY);
+        wing.curveTo(anchorX + dir * (4.0 + spread), anchorY - 7.0, anchorX + dir * (11.0 + spread), anchorY - 8.0, anchorX + dir * 14.0, anchorY - 1.0);
+        wing.curveTo(anchorX + dir * 10.0, anchorY + 5.0, anchorX + dir * 5.0, anchorY + 9.0, anchorX + dir * 1.5, anchorY + 7.0);
+        wing.closePath();
+        g2.setColor(shade);
+        g2.fill(wing);
+
+        Path2D.Double innerWing = new Path2D.Double();
+        innerWing.moveTo(anchorX, anchorY);
+        innerWing.curveTo(anchorX + dir * (3.0 + spread * 0.75), anchorY - 5.0, anchorX + dir * (8.5 + spread * 0.55), anchorY - 5.0, anchorX + dir * 10.0, anchorY - 0.5);
+        innerWing.curveTo(anchorX + dir * 7.0, anchorY + 4.0, anchorX + dir * 3.0, anchorY + 6.5, anchorX + dir * 1.0, anchorY + 5.5);
+        innerWing.closePath();
+        g2.setColor(main);
+        g2.fill(innerWing);
+    }
+
+    private void drawBatWing(Graphics2D g2, boolean left, double anchorX, double anchorY, double spread, Color main, Color edge) {
+        int dir = left ? -1 : 1;
+        Path2D.Double wing = new Path2D.Double();
+        wing.moveTo(anchorX, anchorY);
+        wing.lineTo(anchorX + dir * (6.0 + spread), anchorY - 5.0);
+        wing.lineTo(anchorX + dir * (13.0 + spread), anchorY - 1.0);
+        wing.lineTo(anchorX + dir * 10.0, anchorY + 4.0);
+        wing.lineTo(anchorX + dir * 6.0, anchorY + 2.0);
+        wing.lineTo(anchorX + dir * 2.5, anchorY + 6.0);
+        wing.closePath();
+        g2.setColor(main);
+        g2.fill(wing);
+        g2.setColor(edge);
+        g2.draw(wing);
+    }
+
+    private void drawHalo(Graphics2D g2, Color ring, Color glow, int cx, int cy, int width, int height) {
+        g2.setColor(glow);
+        g2.drawOval(cx - width / 2 - 1, cy - height / 2 - 1, width + 2, height + 2);
+        g2.setColor(ring);
+        g2.drawOval(cx - width / 2, cy - height / 2, width, height);
+    }
+
+    private void drawHorn(Graphics2D g2, boolean left, Color color) {
+        int dir = left ? -1 : 1;
+        Polygon horn = new Polygon(
+                new int[]{dir * 1, dir * 6, dir * 3},
+                new int[]{-8, -13, -8},
+                3
+        );
+        g2.setColor(color);
+        g2.fillPolygon(horn);
     }
 
     private void drawLaneCreepAttackEffect(Graphics2D g2, Creep creep, int sx, int sy, int radius) {
