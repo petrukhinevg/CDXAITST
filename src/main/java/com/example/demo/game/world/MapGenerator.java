@@ -22,11 +22,7 @@ public class MapGenerator {
         carveBaseArea(map, MapLayout.LIGHT_THRONE_TILE, scaledRadius(map, 9));
         carveBaseArea(map, MapLayout.DARK_THRONE_TILE, scaledRadius(map, 9));
 
-        paintRiver(map);
         paintHighGround(map);
-        carveJungleRoadsAndCamps(map);
-
-        plantForest(map, random);
         placeProps(map, random);
     }
 
@@ -225,12 +221,10 @@ public class MapGenerator {
                 }
 
                 double roll = random.nextDouble();
-                if (roll < 0.018) {
+                if (roll < 0.020) {
                     map.setProp(x, y, PropType.ROCK);
-                } else if (roll < 0.031) {
-                    map.setProp(x, y, PropType.BUSH);
-                } else if (roll < 0.037) {
-                    map.setProp(x, y, PropType.STUMP);
+                } else if (roll < 0.032) {
+                    map.setProp(x, y, PropType.PEBBLES);
                 }
             }
         }

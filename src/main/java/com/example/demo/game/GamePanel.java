@@ -267,33 +267,6 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
     }
 
     private void initNeutralCreeps() {
-        for (Point camp : MapLayout.neutralCampTiles()) {
-            double campX = map.tileCenter(camp.x);
-            double campY = map.tileCenter(camp.y);
-            for (int i = 0; i < 2; i++) {
-                Creep c = new Creep();
-                c.team = Team.NEUTRAL;
-                c.role = CreepRole.NEUTRAL;
-                c.lane = null;
-                c.x = campX + random.nextDouble() * 26.0 - 13.0;
-                c.y = campY + random.nextDouble() * 26.0 - 13.0;
-                c.radius = 11;
-                c.maxHp = 90;
-                c.hp = c.maxHp;
-                c.damage = 8;
-                c.defense = 1;
-                c.moveSpeed = 54;
-                c.attackRange = 34;
-                c.attackCooldown = 1.1;
-                c.attackTimer = random.nextDouble() * 0.8;
-                c.homeX = campX;
-                c.homeY = campY;
-                c.leashRadius = 132.0;
-                c.aggroRadius = 92.0;
-                c.lookAngle = random.nextDouble() * Math.PI * 2.0;
-                neutralCreeps.add(c);
-            }
-        }
     }
 
     private void initHeroAbilities() {
