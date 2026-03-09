@@ -8,9 +8,9 @@ public final class GameConfig {
     public static final int VIEW_H = 1000;
     public static final int TILE = 24;
 
-    public static final int MAP_W = 220;
-    public static final int MAP_H = 220;
+    public static final int MAP_W = 160;
+    public static final int MAP_H = 160;
 
-    public static final int PLAYER_START_TILE_X = 28;
-    public static final int PLAYER_START_TILE_Y = 192;
+    public static final int PLAYER_START_TILE_X = 20;
+    public static final int PLAYER_START_TILE_Y = 140;
 }

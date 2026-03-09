@@ -15,30 +15,30 @@ public final class MapLayout {
     private MapLayout() {
     }
 
-    public static final Point LIGHT_THRONE_TILE = new Point(20, 200);
-    public static final Point DARK_THRONE_TILE = new Point(200, 20);
+    public static final Point LIGHT_THRONE_TILE = new Point(15, 145);
+    public static final Point DARK_THRONE_TILE = new Point(145, 15);
 
     private static final Point[] TOP_LANE = {
-            new Point(20, 200), new Point(20, 156), new Point(22, 112),
-            new Point(24, 68), new Point(24, 20), new Point(76, 20),
-            new Point(136, 20), new Point(200, 20)
+            new Point(15, 145), new Point(15, 113), new Point(16, 81),
+            new Point(17, 49), new Point(17, 15), new Point(55, 15),
+            new Point(99, 15), new Point(145, 15)
     };
 
     private static final Point[] MID_LANE = {
-            new Point(20, 200), new Point(56, 164), new Point(92, 128),
-            new Point(110, 110), new Point(128, 92), new Point(164, 56),
-            new Point(200, 20)
+            new Point(15, 145), new Point(41, 119), new Point(67, 93),
+            new Point(80, 80), new Point(93, 67), new Point(119, 41),
+            new Point(145, 15)
     };
 
     private static final Point[] BOT_LANE = {
-            new Point(20, 200), new Point(68, 200), new Point(116, 198),
-            new Point(164, 198), new Point(200, 198), new Point(200, 150),
-            new Point(198, 104), new Point(198, 56), new Point(200, 20)
+            new Point(15, 145), new Point(49, 145), new Point(84, 144),
+            new Point(119, 144), new Point(145, 144), new Point(145, 109),
+            new Point(144, 76), new Point(144, 41), new Point(145, 15)
     };
 
     private static final Point[] NEUTRAL_CAMPS = {
-            new Point(58, 150), new Point(82, 118), new Point(118, 82), new Point(150, 58),
-            new Point(62, 182), new Point(182, 62), new Point(116, 150), new Point(150, 116)
+            new Point(42, 109), new Point(60, 86), new Point(86, 60), new Point(109, 42),
+            new Point(45, 132), new Point(132, 45), new Point(84, 109), new Point(109, 84)
     };
 
     public static List<Point> laneTiles(LaneType lane) {
@@ -61,13 +61,13 @@ public final class MapLayout {
         EnumMap<LaneType, List<Point>> map = new EnumMap<>(LaneType.class);
 
         if (team == Team.LIGHT) {
-            map.put(LaneType.TOP, List.of(new Point(20, 164), new Point(24, 86)));
-            map.put(LaneType.MID, List.of(new Point(48, 172), new Point(94, 126)));
-            map.put(LaneType.BOT, List.of(new Point(72, 200), new Point(144, 198)));
+            map.put(LaneType.TOP, List.of(new Point(15, 119), new Point(17, 63)));
+            map.put(LaneType.MID, List.of(new Point(35, 125), new Point(68, 92)));
+            map.put(LaneType.BOT, List.of(new Point(52, 145), new Point(105, 144)));
         } else {
-            map.put(LaneType.TOP, List.of(new Point(150, 20), new Point(76, 20)));
-            map.put(LaneType.MID, List.of(new Point(172, 48), new Point(126, 94)));
-            map.put(LaneType.BOT, List.of(new Point(198, 150), new Point(198, 76)));
+            map.put(LaneType.TOP, List.of(new Point(109, 15), new Point(55, 15)));
+            map.put(LaneType.MID, List.of(new Point(125, 35), new Point(92, 68)));
+            map.put(LaneType.BOT, List.of(new Point(144, 109), new Point(144, 55)));
         }
 
         return map;

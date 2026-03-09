@@ -17,8 +17,8 @@ public class MapGenerator {
         carveLane(map, MapLayout.laneTiles(LaneType.MID), 2);
         carveLane(map, MapLayout.laneTiles(LaneType.BOT), 2);
 
-        carveBaseArea(map, MapLayout.LIGHT_THRONE_TILE, 12);
-        carveBaseArea(map, MapLayout.DARK_THRONE_TILE, 12);
+        carveBaseArea(map, MapLayout.LIGHT_THRONE_TILE, 9);
+        carveBaseArea(map, MapLayout.DARK_THRONE_TILE, 9);
 
         paintRiver(map);
         paintHighGround(map);
@@ -67,7 +67,7 @@ public class MapGenerator {
     private void paintRiver(GameMap map) {
         for (int x = 0; x < map.getWidth(); x++) {
             int yCenter = x + (int) Math.round(Math.sin(x * 0.05) * 3.0);
-            for (int y = yCenter - 4; y <= yCenter + 4; y++) {
+            for (int y = yCenter - 3; y <= yCenter + 3; y++) {
                 if (!map.inBounds(x, y)) {
                     continue;
                 }
@@ -75,7 +75,7 @@ public class MapGenerator {
                 map.setRiver(x, y, true);
                 map.setElevation(x, y, -1);
 
-                if (Math.abs(x - map.getWidth() / 2) <= 10 && Math.abs(y - map.getHeight() / 2) <= 10 && map.isLane(x, y)) {
+                if (Math.abs(x - map.getWidth() / 2) <= 7 && Math.abs(y - map.getHeight() / 2) <= 7 && map.isLane(x, y)) {
                     map.setGround(x, y, GroundType.DIRT);
                 } else {
                     map.setGround(x, y, GroundType.RIVER);
@@ -88,12 +88,12 @@ public class MapGenerator {
     }
 
     private void paintHighGround(GameMap map) {
-        raiseRegion(map, 28, 28, 96, 96);
-        raiseRegion(map, 124, 124, 192, 192);
-        raiseRegion(map, 28, 124, 96, 192);
-        raiseRegion(map, 124, 28, 192, 96);
-        raiseRegion(map, 46, 164, 92, 208);
-        raiseRegion(map, 128, 12, 174, 56);
+        raiseRegion(map, 20, 20, 70, 70);
+        raiseRegion(map, 90, 90, 140, 140);
+        raiseRegion(map, 20, 90, 70, 140);
+        raiseRegion(map, 90, 20, 140, 70);
+        raiseRegion(map, 33, 119, 67, 151);
+        raiseRegion(map, 93, 9, 127, 41);
     }
 
     private void raiseRegion(GameMap map, int x1, int y1, int x2, int y2) {
@@ -111,16 +111,16 @@ public class MapGenerator {
     }
 
     private void carveJungleRoadsAndCamps(GameMap map) {
-        carveTrail(map, List.of(new Point(32, 178), new Point(52, 154), new Point(74, 132), new Point(98, 110)), 2);
-        carveTrail(map, List.of(new Point(58, 198), new Point(80, 174), new Point(102, 150), new Point(124, 126)), 2);
-        carveTrail(map, List.of(new Point(24, 136), new Point(46, 120), new Point(72, 104), new Point(96, 92)), 2);
+        carveTrail(map, List.of(new Point(23, 129), new Point(38, 112), new Point(54, 96), new Point(71, 80)), 2);
+        carveTrail(map, List.of(new Point(42, 144), new Point(58, 127), new Point(74, 109), new Point(90, 92)), 2);
+        carveTrail(map, List.of(new Point(17, 99), new Point(33, 87), new Point(52, 76), new Point(70, 67)), 2);
 
-        carveTrail(map, List.of(new Point(188, 42), new Point(166, 66), new Point(146, 88), new Point(124, 110)), 2);
-        carveTrail(map, List.of(new Point(164, 22), new Point(140, 46), new Point(118, 70), new Point(96, 94)), 2);
-        carveTrail(map, List.of(new Point(198, 84), new Point(176, 100), new Point(150, 116), new Point(124, 128)), 2);
+        carveTrail(map, List.of(new Point(137, 31), new Point(121, 48), new Point(106, 64), new Point(90, 80)), 2);
+        carveTrail(map, List.of(new Point(119, 16), new Point(102, 33), new Point(86, 51), new Point(70, 68)), 2);
+        carveTrail(map, List.of(new Point(144, 61), new Point(128, 73), new Point(109, 84), new Point(90, 93)), 2);
 
         for (Point camp : MapLayout.neutralCampTiles()) {
-            carveCamp(map, camp, 5);
+            carveCamp(map, camp, 4);
         }
     }
 
@@ -207,7 +207,7 @@ public class MapGenerator {
         }
 
         for (Point camp : MapLayout.neutralCampTiles()) {
-            carveCamp(map, camp, 5);
+            carveCamp(map, camp, 4);
         }
     }
 
