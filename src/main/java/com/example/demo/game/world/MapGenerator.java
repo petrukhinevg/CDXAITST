@@ -7,18 +7,20 @@ import java.util.List;
 import java.util.Random;
 
 public class MapGenerator {
+    private static final double BASE_MAP_SIZE = 160.0;
 
     public void generate(GameMap map, Random random) {
         map.reset(random);
 
         paintBaseGround(map, random);
 
-        carveLane(map, MapLayout.laneTiles(LaneType.TOP), 2);
-        carveLane(map, MapLayout.laneTiles(LaneType.MID), 2);
-        carveLane(map, MapLayout.laneTiles(LaneType.BOT), 2);
+        int laneHalfWidth = scaledRadius(map, 2);
+        carveLane(map, MapLayout.laneTiles(LaneType.TOP), laneHalfWidth);
+        carveLane(map, MapLayout.laneTiles(LaneType.MID), laneHalfWidth);
+        carveLane(map, MapLayout.laneTiles(LaneType.BOT), laneHalfWidth);
 
-        carveBaseArea(map, MapLayout.LIGHT_THRONE_TILE, 9);
-        carveBaseArea(map, MapLayout.DARK_THRONE_TILE, 9);
+        carveBaseArea(map, MapLayout.LIGHT_THRONE_TILE, scaledRadius(map, 9));
+        carveBaseArea(map, MapLayout.DARK_THRONE_TILE, scaledRadius(map, 9));
 
         paintRiver(map);
         paintHighGround(map);
@@ -66,8 +68,9 @@ public class MapGenerator {
 
     private void paintRiver(GameMap map) {
         for (int x = 0; x < map.getWidth(); x++) {
-            int yCenter = x + (int) Math.round(Math.sin(x * 0.05) * 3.0);
-            for (int y = yCenter - 3; y <= yCenter + 3; y++) {
+            int yCenter = x + (int) Math.round(Math.sin(x * 0.05) * scaled(map, 3.0));
+            int riverHalfWidth = scaledRadius(map, 3);
+            for (int y = yCenter - riverHalfWidth; y <= yCenter + riverHalfWidth; y++) {
                 if (!map.inBounds(x, y)) {
                     continue;
                 }
@@ -75,7 +78,9 @@ public class MapGenerator {
                 map.setRiver(x, y, true);
                 map.setElevation(x, y, -1);
 
-                if (Math.abs(x - map.getWidth() / 2) <= 7 && Math.abs(y - map.getHeight() / 2) <= 7 && map.isLane(x, y)) {
+                if (Math.abs(x - map.getWidth() / 2) <= scaledRadius(map, 7)
+                        && Math.abs(y - map.getHeight() / 2) <= scaledRadius(map, 7)
+                        && map.isLane(x, y)) {
                     map.setGround(x, y, GroundType.DIRT);
                 } else {
                     map.setGround(x, y, GroundType.RIVER);
@@ -88,12 +93,12 @@ public class MapGenerator {
     }
 
     private void paintHighGround(GameMap map) {
-        raiseRegion(map, 20, 20, 70, 70);
-        raiseRegion(map, 90, 90, 140, 140);
-        raiseRegion(map, 20, 90, 70, 140);
-        raiseRegion(map, 90, 20, 140, 70);
-        raiseRegion(map, 33, 119, 67, 151);
-        raiseRegion(map, 93, 9, 127, 41);
+        raiseRegion(map, sx(map, 20), sy(map, 20), sx(map, 70), sy(map, 70));
+        raiseRegion(map, sx(map, 90), sy(map, 90), sx(map, 140), sy(map, 140));
+        raiseRegion(map, sx(map, 20), sy(map, 90), sx(map, 70), sy(map, 140));
+        raiseRegion(map, sx(map, 90), sy(map, 20), sx(map, 140), sy(map, 70));
+        raiseRegion(map, sx(map, 33), sy(map, 119), sx(map, 67), sy(map, 151));
+        raiseRegion(map, sx(map, 93), sy(map, 9), sx(map, 127), sy(map, 41));
     }
 
     private void raiseRegion(GameMap map, int x1, int y1, int x2, int y2) {
@@ -111,16 +116,17 @@ public class MapGenerator {
     }
 
     private void carveJungleRoadsAndCamps(GameMap map) {
-        carveTrail(map, List.of(new Point(23, 129), new Point(38, 112), new Point(54, 96), new Point(71, 80)), 2);
-        carveTrail(map, List.of(new Point(42, 144), new Point(58, 127), new Point(74, 109), new Point(90, 92)), 2);
-        carveTrail(map, List.of(new Point(17, 99), new Point(33, 87), new Point(52, 76), new Point(70, 67)), 2);
+        int trailHalfWidth = scaledRadius(map, 2);
+        carveTrail(map, List.of(p(map, 23, 129), p(map, 38, 112), p(map, 54, 96), p(map, 71, 80)), trailHalfWidth);
+        carveTrail(map, List.of(p(map, 42, 144), p(map, 58, 127), p(map, 74, 109), p(map, 90, 92)), trailHalfWidth);
+        carveTrail(map, List.of(p(map, 17, 99), p(map, 33, 87), p(map, 52, 76), p(map, 70, 67)), trailHalfWidth);
 
-        carveTrail(map, List.of(new Point(137, 31), new Point(121, 48), new Point(106, 64), new Point(90, 80)), 2);
-        carveTrail(map, List.of(new Point(119, 16), new Point(102, 33), new Point(86, 51), new Point(70, 68)), 2);
-        carveTrail(map, List.of(new Point(144, 61), new Point(128, 73), new Point(109, 84), new Point(90, 93)), 2);
+        carveTrail(map, List.of(p(map, 137, 31), p(map, 121, 48), p(map, 106, 64), p(map, 90, 80)), trailHalfWidth);
+        carveTrail(map, List.of(p(map, 119, 16), p(map, 102, 33), p(map, 86, 51), p(map, 70, 68)), trailHalfWidth);
+        carveTrail(map, List.of(p(map, 144, 61), p(map, 128, 73), p(map, 109, 84), p(map, 90, 93)), trailHalfWidth);
 
         for (Point camp : MapLayout.neutralCampTiles()) {
-            carveCamp(map, camp, 4);
+            carveCamp(map, camp, scaledRadius(map, 4));
         }
     }
 
@@ -207,7 +213,7 @@ public class MapGenerator {
         }
 
         for (Point camp : MapLayout.neutralCampTiles()) {
-            carveCamp(map, camp, 4);
+            carveCamp(map, camp, scaledRadius(map, 4));
         }
     }
 
@@ -257,5 +263,29 @@ public class MapGenerator {
 
     private double distance(double x1, double y1, double x2, double y2) {
         return Math.hypot(x1 - x2, y1 - y2);
+    }
+
+    private Point p(GameMap map, int x, int y) {
+        return new Point(sx(map, x), sy(map, y));
+    }
+
+    private int sx(GameMap map, int value) {
+        return clamp((int) Math.round(value * map.getWidth() / BASE_MAP_SIZE), 0, map.getWidth() - 1);
+    }
+
+    private int sy(GameMap map, int value) {
+        return clamp((int) Math.round(value * map.getHeight() / BASE_MAP_SIZE), 0, map.getHeight() - 1);
+    }
+
+    private int scaledRadius(GameMap map, int value) {
+        return Math.max(1, (int) Math.round(value * Math.min(map.getWidth(), map.getHeight()) / BASE_MAP_SIZE));
+    }
+
+    private double scaled(GameMap map, double value) {
+        return value * Math.min(map.getWidth(), map.getHeight()) / BASE_MAP_SIZE;
+    }
+
+    private int clamp(int value, int min, int max) {
+        return Math.max(min, Math.min(max, value));
     }
 }
