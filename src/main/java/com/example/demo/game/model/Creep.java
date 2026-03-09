@@ -7,6 +7,7 @@ import java.util.List;
 public class Creep implements CombatUnit {
     public Team team;
     public CreepRole role;
+    public LaneCreepType laneType = LaneCreepType.MELEE;
     public LaneType lane;
 
     public double x;

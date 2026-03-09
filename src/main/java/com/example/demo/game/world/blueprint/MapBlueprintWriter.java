@@ -36,6 +36,7 @@ public final class MapBlueprintWriter {
         out.append("# l1 top_lane\n");
         out.append("# l2 mid_lane\n");
         out.append("# l3 bot_lane\n");
+        out.append("# bd1 boulder\n");
         out.append("# rk1 rock\n");
         out.append("# bh1 bush\n");
         out.append("# st1 stump\n");
@@ -141,6 +142,7 @@ public final class MapBlueprintWriter {
         }
         if (map.getProp(x, y) != null) {
             layers.add(switch (map.getProp(x, y).kind()) {
+                case BOULDER -> "bd1";
                 case ROCK -> "rk1";
                 case BUSH -> "bh1";
                 case STUMP -> "st1";

@@ -35,10 +35,10 @@ public class MapRenderer {
                 int sx = x * map.getTileSize();
                 int sy = y * map.getTileSize();
 
-                if (map.isBlocked(x, y)) {
-                    drawTree(g2, map.getTileSize(), x, y, sx, sy, map.getTreeVariant(x, y), map.getTreeTint(x, y));
-                } else if (map.getProp(x, y) != null) {
+                if (map.getProp(x, y) != null && (!map.isBlocked(x, y) || map.getProp(x, y).kind() == com.example.demo.game.world.element.PropKind.BOULDER)) {
                     drawProp(g2, sx, sy, map.getProp(x, y));
+                } else if (map.isBlocked(x, y)) {
+                    drawTree(g2, map.getTileSize(), x, y, sx, sy, map.getTreeVariant(x, y), map.getTreeTint(x, y));
                 }
             }
         }
@@ -235,6 +235,16 @@ public class MapRenderer {
 
     private void drawProp(Graphics2D g2, int sx, int sy, PropElement type) {
         switch (type.kind()) {
+            case BOULDER -> {
+                g2.setColor(new Color(52, 56, 61, 150));
+                g2.fillOval(sx + 3, sy + 15, 19, 6);
+                g2.setColor(new Color(82, 86, 92));
+                g2.fillOval(sx + 4, sy + 7, 18, 12);
+                g2.setColor(new Color(108, 113, 119));
+                g2.fillOval(sx + 7, sy + 6, 10, 6);
+                g2.setColor(new Color(60, 64, 70));
+                g2.drawArc(sx + 5, sy + 8, 16, 10, 190, 140);
+            }
             case ROCK -> {
                 g2.setColor(new Color(85, 88, 91));
                 g2.fillOval(sx + 6, sy + 11, 12, 8);

@@ -18,6 +18,9 @@ public class Structure implements CombatEntity {
     public double attackCooldown;
     public double attackTimer;
     public CombatEntity attackTarget;
+    public double attackAnimationTimer;
+    public double attackVisualTargetX;
+    public double attackVisualTargetY;
 
     public int laneOrder;
 

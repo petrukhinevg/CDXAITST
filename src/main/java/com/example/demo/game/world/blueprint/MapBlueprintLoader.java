@@ -156,6 +156,11 @@ public final class MapBlueprintLoader {
                 case "l1" -> laneMask |= laneBit(LaneType.TOP);
                 case "l2" -> laneMask |= laneBit(LaneType.MID);
                 case "l3" -> laneMask |= laneBit(LaneType.BOT);
+                case "bd1" -> {
+                    prop = MapElements.BOULDER;
+                    blocked = true;
+                    blockedExplicit = true;
+                }
                 case "rk1" -> prop = MapElements.ROCK;
                 case "bh1" -> prop = MapElements.BUSH;
                 case "st1" -> prop = MapElements.STUMP;

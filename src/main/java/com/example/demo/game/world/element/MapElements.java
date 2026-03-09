@@ -11,6 +11,7 @@ public final class MapElements {
 
     public static final WaterElement RIVER = RiverElement.INSTANCE;
 
+    public static final PropElement BOULDER = new StaticPropElement("boulder", PropKind.BOULDER);
     public static final PropElement ROCK = new StaticPropElement("rock", PropKind.ROCK);
     public static final PropElement BUSH = new StaticPropElement("bush", PropKind.BUSH);
     public static final PropElement STUMP = new StaticPropElement("stump", PropKind.STUMP);
