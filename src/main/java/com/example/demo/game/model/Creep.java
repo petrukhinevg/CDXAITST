@@ -30,7 +30,6 @@ public class Creep implements CombatUnit {
     public boolean lastHitByCreep;
     public boolean aggroedToHero;
     public int formationSlot;
-
     public int waypointIndex;
     public boolean moving;
     public double animPhase;

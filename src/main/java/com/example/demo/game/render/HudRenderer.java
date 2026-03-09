@@ -20,6 +20,9 @@ public final class HudRenderer {
     private static final int MINIMAP_SIZE = 220;
     private static final int MINIMAP_PAD = 8;
 
+    public record MiniMapBounds(int panelX, int panelY, int mapX, int mapY, int mapW, int mapH) {
+    }
+
     public record Model(int panelWidth,
                         int panelHeight,
                         double zoom,
@@ -56,6 +59,16 @@ public final class HudRenderer {
         g2.drawImage(mapLayer, 0, 0, miniSize, miniSize, null);
         g2.dispose();
         return mini;
+    }
+
+    public static MiniMapBounds miniMapBounds(int panelHeight) {
+        int panelX = 16;
+        int panelY = panelHeight - MINIMAP_SIZE - 16;
+        int mapX = panelX + MINIMAP_PAD;
+        int mapY = panelY + MINIMAP_PAD;
+        int mapW = MINIMAP_SIZE - MINIMAP_PAD * 2;
+        int mapH = MINIMAP_SIZE - MINIMAP_PAD * 2;
+        return new MiniMapBounds(panelX, panelY, mapX, mapY, mapW, mapH);
     }
 
     public void draw(Graphics2D g2, Model model) {
@@ -123,12 +136,13 @@ public final class HudRenderer {
     }
 
     private void drawMiniMap(Graphics2D g2, Model model) {
-        int panelX = 16;
-        int panelY = model.panelHeight() - MINIMAP_SIZE - 16;
-        int mapX = panelX + MINIMAP_PAD;
-        int mapY = panelY + MINIMAP_PAD;
-        int mapW = MINIMAP_SIZE - MINIMAP_PAD * 2;
-        int mapH = MINIMAP_SIZE - MINIMAP_PAD * 2;
+        MiniMapBounds bounds = miniMapBounds(model.panelHeight());
+        int panelX = bounds.panelX();
+        int panelY = bounds.panelY();
+        int mapX = bounds.mapX();
+        int mapY = bounds.mapY();
+        int mapW = bounds.mapW();
+        int mapH = bounds.mapH();
 
         g2.setColor(new Color(0, 0, 0, 165));
         g2.fillRoundRect(panelX, panelY, MINIMAP_SIZE, MINIMAP_SIZE, 10, 10);
