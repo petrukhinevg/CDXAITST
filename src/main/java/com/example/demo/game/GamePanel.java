@@ -39,6 +39,7 @@ import java.awt.Composite;
 import java.awt.geom.Path2D;
 import java.awt.Point;
 import java.awt.RenderingHints;
+import java.awt.Stroke;
 import java.awt.image.BufferedImage;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -75,6 +76,7 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
     private static final double CAMERA_EDGE_MOVE_SPEED = 420.0;
     private static final int CAMERA_EDGE_SCROLL_MARGIN = 28;
     private static final double CLICK_MARKER_LIFETIME = 0.75;
+    private static final double ATTACK_RANGE_BALANCE_SCALE = 1.0 / 1.25;
 
     private final Random random = new Random();
 
@@ -112,6 +114,7 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
     private boolean cameraDown;
     private boolean cameraLeft;
     private boolean cameraRight;
+    private boolean showAttackRanges;
     private boolean middleMouseDragging;
     private boolean mouseInsideWindow;
     private int dragLastMouseX;
@@ -292,7 +295,7 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
         s.hp = s.maxHp;
         s.damage = 14;
         s.defense = 3;
-        s.attackRange = 185;
+        s.attackRange = scaleAttackRange(185);
         s.attackCooldown = 1.1;
         return s;
     }
@@ -310,7 +313,7 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
         s.hp = s.maxHp;
         s.damage = 18;
         s.defense = 6;
-        s.attackRange = 230;
+        s.attackRange = scaleAttackRange(230);
         s.attackCooldown = 1.0;
         return s;
     }
@@ -369,7 +372,7 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
         creep.damage = 7;
         creep.defense = 1;
         creep.moveSpeed = 66;
-        creep.attackRange = 31;
+        creep.attackRange = scaleAttackRange(31);
         creep.attackCooldown = 0.82;
         creep.attackTimer = 0.12 * idx;
         creep.waypointIndex = 1;
@@ -663,15 +666,27 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
 
     private double playerAttackReach(CombatEntity target) {
         if (currentWeapon.projectile()) {
-            return currentWeapon.projectileSpeed() * currentWeapon.projectileLife()
-                    + currentWeapon.projectileRadius()
+            return playerWeaponReach()
                     + target.getRadius();
         }
-        return currentWeapon.meleeRange() + target.getRadius();
+        return playerWeaponReach() + target.getRadius();
     }
 
     private double desiredPlayerAttackReach(CombatEntity target) {
         return playerAttackReach(target) * PLAYER_ATTACK_APPROACH_RATIO;
+    }
+
+    private double playerWeaponReach() {
+        if (currentWeapon.projectile()) {
+            return currentWeapon.projectileSpeed() * currentWeapon.projectileLife()
+                    * ATTACK_RANGE_BALANCE_SCALE
+                    + currentWeapon.projectileRadius();
+        }
+        return currentWeapon.meleeRange() * ATTACK_RANGE_BALANCE_SCALE;
+    }
+
+    private double scaleAttackRange(double range) {
+        return range * ATTACK_RANGE_BALANCE_SCALE;
     }
 
     private boolean canPlayerAttackTargetFrom(double sourceX, double sourceY, CombatEntity target, double attackReach) {
@@ -877,7 +892,7 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
         bullet.vx = dx * weapon.projectileSpeed();
         bullet.vy = dy * weapon.projectileSpeed();
         bullet.radius = weapon.projectileRadius();
-        bullet.life = weapon.projectileLife();
+        bullet.life = weapon.projectileLife() * ATTACK_RANGE_BALANCE_SCALE;
         bullet.damage = weapon.damage();
         bullet.colorArgb = weapon.projectileColorArgb();
         bullets.add(bullet);
@@ -885,28 +900,29 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
 
     private void performMeleeAttack(WeaponType weapon) {
         double arcHalf = Math.toRadians(weapon.meleeArcDegrees() / 2.0);
+        double meleeRange = weapon.meleeRange() * ATTACK_RANGE_BALANCE_SCALE;
 
         for (Player hero : heroes) {
-            if (isHostileHero(hero) && inMeleeArc(hero.x, hero.y, weapon.meleeRange() + hero.radius, arcHalf)) {
+            if (isHostileHero(hero) && inMeleeArc(hero.x, hero.y, meleeRange + hero.radius, arcHalf)) {
                 damageHero(hero, weapon.damage());
             }
         }
 
         for (Creep creep : laneCreeps) {
-            if (isHostileCreep(creep) && inMeleeArc(creep.x, creep.y, weapon.meleeRange() + creep.radius, arcHalf)) {
+            if (isHostileCreep(creep) && inMeleeArc(creep.x, creep.y, meleeRange + creep.radius, arcHalf)) {
                 damageCreepByHero(creep, weapon.damage());
             }
         }
 
         for (Creep creep : neutralCreeps) {
-            if (isHostileCreep(creep) && inMeleeArc(creep.x, creep.y, weapon.meleeRange() + creep.radius, arcHalf)) {
+            if (isHostileCreep(creep) && inMeleeArc(creep.x, creep.y, meleeRange + creep.radius, arcHalf)) {
                 damageCreepByHero(creep, weapon.damage());
             }
         }
 
         for (Structure structure : structures) {
             if (isHostileStructure(structure) && structure.hp > 0
-                    && inMeleeArc(structure.x, structure.y, weapon.meleeRange() + structure.radius, arcHalf)) {
+                    && inMeleeArc(structure.x, structure.y, meleeRange + structure.radius, arcHalf)) {
                 damageStructure(structure, weapon.damage());
             }
         }
@@ -1278,50 +1294,70 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
     private void updateStructures(double dt) {
         for (Structure structure : structures) {
             if (structure.hp <= 0) {
+                structure.attackTarget = null;
                 continue;
             }
 
             structure.attackTimer = Math.max(0.0, structure.attackTimer - dt);
-            if (structure.attackTimer > 0.0) {
+            if (!isValidStructureTarget(structure, structure.attackTarget)) {
+                structure.attackTarget = null;
+            }
+
+            if (structure.attackTarget == null) {
+                structure.attackTarget = acquireStructureTarget(structure);
+            }
+
+            if (structure.attackTimer > 0.0 || structure.attackTarget == null) {
                 continue;
             }
 
-            Team enemyTeam = structure.team.opposite();
-            List<Creep> candidates = new ArrayList<>();
-            for (Creep creep : laneCreeps) {
-                if (creep.hp <= 0 || creep.team != enemyTeam) {
+            damageStructureTarget(structure, structure.attackTarget);
+            structure.attackTimer = structure.attackCooldown;
+        }
+    }
+
+    private CombatEntity acquireStructureTarget(Structure structure) {
+        Team enemyTeam = structure.team.opposite();
+        List<CombatEntity> candidates = new ArrayList<>();
+
+        for (Creep creep : laneCreeps) {
+            if (creep.hp <= 0 || creep.team != enemyTeam) {
+                continue;
+            }
+            if (distance(structure.x, structure.y, creep.x, creep.y) <= structure.attackRange) {
+                candidates.add(creep);
+            }
+        }
+
+        if (!gameOver) {
+            for (Player hero : heroes) {
+                if (hero.hp <= 0 || hero.team != enemyTeam) {
                     continue;
                 }
-                if (distance(structure.x, structure.y, creep.x, creep.y) <= structure.attackRange) {
-                    candidates.add(creep);
+                if (distance(structure.x, structure.y, hero.x, hero.y) <= structure.attackRange) {
+                    candidates.add(hero);
                 }
             }
+        }
 
-            List<Player> heroCandidates = new ArrayList<>();
-            if (!gameOver) {
-                for (Player hero : heroes) {
-                    if (hero.hp <= 0 || hero.team != enemyTeam) {
-                        continue;
-                    }
-                    if (distance(structure.x, structure.y, hero.x, hero.y) <= structure.attackRange) {
-                        heroCandidates.add(hero);
-                    }
-                }
-            }
+        if (candidates.isEmpty()) {
+            return null;
+        }
+        return candidates.get(random.nextInt(candidates.size()));
+    }
 
-            int totalTargets = candidates.size() + heroCandidates.size();
-            if (totalTargets == 0) {
-                continue;
-            }
+    private boolean isValidStructureTarget(Structure structure, CombatEntity target) {
+        return target != null
+                && target.isAlive()
+                && target.getTeam() == structure.team.opposite()
+                && distance(structure.x, structure.y, target.getX(), target.getY()) <= structure.attackRange;
+    }
 
-            int picked = random.nextInt(totalTargets);
-            if (picked < candidates.size()) {
-                damageCreepByStructure(candidates.get(picked), structure.damage);
-            } else {
-                damageHero(heroCandidates.get(picked - candidates.size()), structure.damage);
-            }
-
-            structure.attackTimer = structure.attackCooldown;
+    private void damageStructureTarget(Structure structure, CombatEntity target) {
+        if (target instanceof Creep creep) {
+            damageCreepByStructure(creep, structure.damage);
+        } else if (target instanceof Player hero) {
+            damageHero(hero, structure.damage);
         }
     }
 
@@ -1943,6 +1979,9 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
         drawMap(g2);
 
         g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+        if (showAttackRanges) {
+            drawAttackRanges(g2);
+        }
         drawStructures(g2);
         drawClickMarkers(g2);
         drawCreeps(g2);
@@ -1970,6 +2009,100 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
 
     private BufferedImage buildMiniMapLayer() {
         return hudRenderer.buildMiniMapLayer(mapLayer);
+    }
+
+    private void drawAttackRanges(Graphics2D g2) {
+        Stroke oldStroke = g2.getStroke();
+
+        for (Structure structure : structures) {
+            if (structure.hp <= 0) {
+                continue;
+            }
+            drawAttackRangeCircle(
+                    g2,
+                    structure.x,
+                    structure.y,
+                    structure.attackRange,
+                    structure.team == Team.LIGHT ? new Color(82, 214, 124, 50) : new Color(255, 90, 90, 52),
+                    structure.team == Team.LIGHT ? new Color(126, 238, 156, 155) : new Color(255, 128, 128, 160)
+            );
+            drawStructureTargetIndicator(g2, structure);
+        }
+
+        for (Player hero : heroes) {
+            if (hero.hp <= 0) {
+                continue;
+            }
+            double attackRange = heroAttackRange(hero);
+            if (attackRange <= 0.0) {
+                continue;
+            }
+            drawAttackRangeCircle(
+                    g2,
+                    hero.x,
+                    hero.y,
+                    attackRange,
+                    hero.team == Team.LIGHT ? new Color(82, 214, 124, 34) : new Color(255, 90, 90, 38),
+                    hero.team == Team.LIGHT ? new Color(126, 238, 156, 135) : new Color(255, 128, 128, 145)
+            );
+        }
+
+        g2.setStroke(oldStroke);
+    }
+
+    private void drawAttackRangeCircle(Graphics2D g2,
+                                       double worldX,
+                                       double worldY,
+                                       double range,
+                                       Color fillColor,
+                                       Color strokeColor) {
+        int sx = worldToScreenX(worldX);
+        int sy = worldToScreenY(worldY);
+        int radius = (int) Math.round(range * ZOOM);
+        g2.setColor(fillColor);
+        g2.fillOval(sx - radius, sy - radius, radius * 2, radius * 2);
+        g2.setColor(strokeColor);
+        g2.setStroke(new BasicStroke(1.6f));
+        g2.drawOval(sx - radius, sy - radius, radius * 2, radius * 2);
+    }
+
+    private void drawStructureTargetIndicator(Graphics2D g2, Structure structure) {
+        if (!isValidStructureTarget(structure, structure.attackTarget)) {
+            return;
+        }
+
+        int sx = worldToScreenX(structure.x);
+        int sy = worldToScreenY(structure.y);
+        int tx = worldToScreenX(structure.attackTarget.getX());
+        int ty = worldToScreenY(structure.attackTarget.getY());
+
+        Color lineColor = structure.team == Team.LIGHT
+                ? new Color(132, 245, 164, 190)
+                : new Color(255, 124, 124, 190);
+        Color targetColor = structure.team == Team.LIGHT
+                ? new Color(214, 255, 224, 210)
+                : new Color(255, 226, 226, 210);
+
+        g2.setStroke(new BasicStroke(1.8f));
+        g2.setColor(lineColor);
+        g2.drawLine(sx, sy, tx, ty);
+
+        int markerRadius = (int) Math.round(8 * ZOOM);
+        g2.setColor(new Color(lineColor.getRed(), lineColor.getGreen(), lineColor.getBlue(), 60));
+        g2.fillOval(tx - markerRadius, ty - markerRadius, markerRadius * 2, markerRadius * 2);
+        g2.setColor(targetColor);
+        g2.drawOval(tx - markerRadius, ty - markerRadius, markerRadius * 2, markerRadius * 2);
+        g2.drawLine(tx - markerRadius - 4, ty, tx - markerRadius / 2, ty);
+        g2.drawLine(tx + markerRadius / 2, ty, tx + markerRadius + 4, ty);
+        g2.drawLine(tx, ty - markerRadius - 4, tx, ty - markerRadius / 2);
+        g2.drawLine(tx, ty + markerRadius / 2, tx, ty + markerRadius + 4);
+    }
+
+    private double heroAttackRange(Player hero) {
+        if (hero == player) {
+            return playerWeaponReach();
+        }
+        return 0.0;
     }
 
     private void drawStructures(Graphics2D g2) {
@@ -2083,21 +2216,27 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
         int sx = worldToScreenX(creep.x);
         int sy = worldToScreenY(creep.y);
         int r = (int) Math.round(creep.radius * ZOOM);
-        BufferedImage sprite = creep.team == Team.LIGHT
-                ? sprites.getPlayerFrame(creep.state, creep.animPhase)
-                : sprites.getEnemyFrame(creep.state, creep.animPhase);
-        drawSpriteWithFacing(g2, sprite, sx, sy, creep.lookAngle);
+        BufferedImage sprite = sprites.getPlayerFrame(creep.state, creep.animPhase);
+        drawTintedSpriteWithFacing(g2, sprite, sx, sy, creep.lookAngle, 1.0, creepTint(creep));
 
         if (creep.state == AnimationState.ATTACK) {
             g2.setColor(creep.team == Team.LIGHT
-                    ? new Color(107, 198, 255, 110)
+                    ? new Color(102, 232, 118, 110)
                     : new Color(255, 118, 92, 110));
             g2.fillOval(sx - r - 4, sy - r - 4, r * 2 + 8, r * 2 + 8);
         }
 
         drawHealthBar(g2, sx, sy - r - 10, 28, 5,
                 (double) creep.hp / creep.maxHp,
-                creep.team == Team.DARK ? new Color(241, 94, 85) : new Color(94, 188, 255));
+                creep.team == Team.LIGHT ? new Color(76, 214, 104) : new Color(241, 94, 85));
+    }
+
+    private Color creepTint(Creep creep) {
+        return switch (creep.team) {
+            case LIGHT -> new Color(66, 196, 88);
+            case DARK -> new Color(198, 54, 54);
+            case NEUTRAL -> new Color(160, 86, 70);
+        };
     }
 
     private void drawExperienceOrbs(Graphics2D g2) {
@@ -2426,7 +2565,7 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
         double arcHalf = Math.toRadians(currentWeapon.meleeArcDegrees() / 2.0);
         double start = player.aimAngle - arcHalf;
         double end = player.aimAngle + arcHalf;
-        double outerR = currentWeapon.meleeRange() * ZOOM;
+        double outerR = currentWeapon.meleeRange() * ATTACK_RANGE_BALANCE_SCALE * ZOOM;
         double innerR = 16.0 * ZOOM;
         double centerR = (outerR + innerR) * 0.5;
 
@@ -2542,6 +2681,7 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
     @Override
     public void keyPressed(KeyEvent e) {
         switch (e.getKeyCode()) {
+            case KeyEvent.VK_ALT -> showAttackRanges = true;
             case KeyEvent.VK_UP -> cameraUp = true;
             case KeyEvent.VK_DOWN -> cameraDown = true;
             case KeyEvent.VK_LEFT -> cameraLeft = true;
@@ -2566,6 +2706,7 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
     @Override
     public void keyReleased(KeyEvent e) {
         switch (e.getKeyCode()) {
+            case KeyEvent.VK_ALT -> showAttackRanges = false;
             case KeyEvent.VK_UP -> cameraUp = false;
             case KeyEvent.VK_DOWN -> cameraDown = false;
             case KeyEvent.VK_LEFT -> cameraLeft = false;
