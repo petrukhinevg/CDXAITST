@@ -15,7 +15,6 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.EnumMap;
 import java.util.List;
-import java.util.Random;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -28,7 +27,7 @@ class MapBlueprintRoundTripTests {
     @Test
     void saveLoadPreservesTreeStateAndTileLayers() throws Exception {
         GameMap source = new GameMap(3, 3, 24);
-        source.reset(new Random(7));
+        source.reset();
 
         source.setGround(1, 1, MapElements.GRASS);
         source.setBlocked(1, 1, true);
@@ -72,7 +71,7 @@ class MapBlueprintRoundTripTests {
 
         MapBlueprint blueprint = new MapBlueprintLoader().load(file);
         GameMap restored = new GameMap(3, 3, 24);
-        blueprint.applyTo(restored, new Random(99));
+        blueprint.applyTo(restored);
 
         assertEquals(MapElements.GRASS, restored.getGround(1, 1));
         assertTrue(restored.isBlocked(1, 1));

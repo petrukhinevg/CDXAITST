@@ -11,7 +11,7 @@ public class MapGenerator {
     private static final double BASE_MAP_SIZE = 160.0;
 
     public void generate(GameMap map, Random random) {
-        map.reset(random);
+        map.reset();
 
         paintBaseGround(map, random);
 

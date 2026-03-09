@@ -7,8 +7,6 @@ import com.example.demo.game.world.element.MapElements;
 import com.example.demo.game.world.element.PropElement;
 import com.example.demo.game.world.element.WaterElement;
 
-import java.util.Random;
-
 public class GameMap {
     private final int width;
     private final int height;
@@ -46,7 +44,7 @@ public class GameMap {
         props = new PropElement[height][width];
     }
 
-    public void reset(Random random) {
+    public void reset() {
         for (int y = 0; y < height; y++) {
             for (int x = 0; x < width; x++) {
                 blocked[y][x] = false;
@@ -55,8 +53,8 @@ public class GameMap {
                 elevation[y][x] = 0;
                 ground[y][x] = MapElements.GRASS;
                 water[y][x] = null;
-                treeVariant[y][x] = random.nextInt(4);
-                treeTint[y][x] = random.nextInt(5) - 2;
+                treeVariant[y][x] = 0;
+                treeTint[y][x] = 0;
                 props[y][x] = null;
             }
         }

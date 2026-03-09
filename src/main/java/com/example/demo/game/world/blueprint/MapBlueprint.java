@@ -12,8 +12,6 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.EnumMap;
 import java.util.List;
-import java.util.Random;
-
 public final class MapBlueprint {
     static final int NO_TREE_VARIANT = -1;
     static final int NO_TREE_TINT = Integer.MIN_VALUE;
@@ -66,13 +64,13 @@ public final class MapBlueprint {
         this.towerTiles = towerTiles;
     }
 
-    public void applyTo(GameMap map, Random random) {
+    public void applyTo(GameMap map) {
         if (map.getWidth() != width || map.getHeight() != height) {
             throw new IllegalArgumentException("Blueprint size " + width + "x" + height
                     + " does not match map size " + map.getWidth() + "x" + map.getHeight());
         }
 
-        map.reset(random);
+        map.reset();
         for (int y = 0; y < height; y++) {
             for (int x = 0; x < width; x++) {
                 map.setGround(x, y, ground[y][x]);
