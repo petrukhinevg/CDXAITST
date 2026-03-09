@@ -1,7 +1,6 @@
 package com.example.demo.game;
 
-import com.example.demo.game.audio.SimpleSoundPlayer;
-import com.example.demo.game.audio.SoundEffect;
+import com.example.demo.game.audio.GameAudio;
 import com.example.demo.game.collision.UnitCollisionResolver;
 import com.example.demo.game.config.GameConfig;
 import com.example.demo.game.model.AnimationState;
@@ -118,7 +117,6 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
     private static final int CAMERA_EDGE_SCROLL_MARGIN = 28;
     private static final double CLICK_MARKER_LIFETIME = 0.75;
     private static final double ATTACK_RANGE_BALANCE_SCALE = 1.0 / 1.25;
-    private static final double PLAYER_FOOTSTEP_INTERVAL = 0.24;
 
     private final Random random = new Random();
 
@@ -129,7 +127,7 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
     private final HudRenderer hudRenderer = new HudRenderer();
     private final MapRenderer mapRenderer = new MapRenderer();
     private final SpriteLibrary sprites = SpriteLibrary.loadDefault();
-    private final SimpleSoundPlayer soundPlayer = new SimpleSoundPlayer();
+    private final GameAudio audio = new GameAudio();
 
     private final Player player = new Player();
     private final List<Player> heroes = new ArrayList<>();
@@ -177,7 +175,6 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
     private double swordSwingTime;
     private double laneWaveTimer;
     private double playerPathRefreshCooldown;
-    private double playerFootstepTimer;
 
     private int kills;
     private boolean gameOver;
@@ -209,7 +206,6 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
     private String editorStatusText = "Tab: editor mode";
     private double editorStatusTimer;
     private boolean editorDirty;
-    private boolean playerNextFootstepLeft = true;
 
     public GamePanel() {
         setPreferredSize(new Dimension(GameConfig.VIEW_W, GameConfig.VIEW_H));
@@ -253,7 +249,6 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
         swordSwingTime = 0.0;
         laneWaveTimer = 15.0;
         playerPathRefreshCooldown = 0.0;
-        playerFootstepTimer = 0.0;
 
         kills = 0;
         gameOver = false;
@@ -265,7 +260,7 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
         editorDirty = false;
         editorStatusText = "Tab: editor mode";
         editorStatusTimer = 0.0;
-        playerNextFootstepLeft = true;
+        audio.reset();
         clearPlayerOrders();
 
         spawnLaneWave();
@@ -590,7 +585,7 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
         }
 
         updatePlayerAnimation(dt, moved);
-        updatePlayerFootsteps(dt, moved);
+        audio.updatePlayerMovement(dt, moved, player.hp > 0 && !gameOver && player.attackAnimationTimer <= 0.0);
         updateBullets(dt);
         updateLaneCreeps(dt);
         updateNeutralCreeps(dt);
@@ -631,23 +626,6 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
             player.state = AnimationState.IDLE;
             player.animPhase += dt * 4.0;
         }
-    }
-
-    private void updatePlayerFootsteps(double dt, boolean moved) {
-        if (!moved || player.hp <= 0 || gameOver || player.attackAnimationTimer > 0.0) {
-            playerFootstepTimer = 0.0;
-            playerNextFootstepLeft = true;
-            return;
-        }
-
-        playerFootstepTimer -= dt;
-        if (playerFootstepTimer > 0.0) {
-            return;
-        }
-
-        soundPlayer.play(playerNextFootstepLeft ? SoundEffect.FOOTSTEP_LEFT : SoundEffect.FOOTSTEP_RIGHT);
-        playerNextFootstepLeft = !playerNextFootstepLeft;
-        playerFootstepTimer += PLAYER_FOOTSTEP_INTERVAL;
     }
 
     private boolean updatePlayerControl(double dt) {
@@ -1034,8 +1012,7 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
         hero.animPhase = 0.0;
         if (hero == player) {
             clearPlayerOrders();
-            playerFootstepTimer = 0.0;
-            playerNextFootstepLeft = true;
+            audio.resetPlayerMovementLoop();
         }
     }
 
@@ -1044,7 +1021,7 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
         player.attackAnimationTimer = currentWeapon.attackAnimationTime();
         player.animPhase = 0.0;
         attackCooldown = currentWeapon.cooldown();
-        soundPlayer.play(currentWeapon.projectile() ? SoundEffect.RANGED_ATTACK : SoundEffect.MELEE_ATTACK);
+        audio.onPlayerAttack(currentWeapon);
 
         if (currentWeapon.projectile()) {
             fireProjectile(currentWeapon);
@@ -1074,22 +1051,26 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
     private void performMeleeAttack(WeaponType weapon) {
         double arcHalf = Math.toRadians(weapon.meleeArcDegrees() / 2.0);
         double meleeRange = weapon.meleeRange() * ATTACK_RANGE_BALANCE_SCALE;
+        boolean hitSomething = false;
 
         for (Player hero : heroes) {
             if (isHostileHero(hero) && inMeleeArc(hero.x, hero.y, meleeRange + hero.radius, arcHalf)) {
                 damageHero(hero, weapon.damage());
+                hitSomething = true;
             }
         }
 
         for (Creep creep : laneCreeps) {
             if (isHostileCreep(creep) && inMeleeArc(creep.x, creep.y, meleeRange + creep.radius, arcHalf)) {
                 damageCreepByHero(creep, weapon.damage());
+                hitSomething = true;
             }
         }
 
         for (Creep creep : neutralCreeps) {
             if (isHostileCreep(creep) && inMeleeArc(creep.x, creep.y, meleeRange + creep.radius, arcHalf)) {
                 damageCreepByHero(creep, weapon.damage());
+                hitSomething = true;
             }
         }
 
@@ -1097,7 +1078,12 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
             if (isHostileStructure(structure) && structure.hp > 0
                     && inMeleeArc(structure.x, structure.y, meleeRange + structure.radius, arcHalf)) {
                 damageStructure(structure, weapon.damage());
+                hitSomething = true;
             }
+        }
+
+        if (hitSomething) {
+            audio.onMeleeImpact();
         }
     }
 
@@ -1123,6 +1109,9 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
             bullet.life -= dt;
 
             if (bullet.life <= 0.0 || map.isBlockedPixel(bullet.x, bullet.y)) {
+                if (map.isBlockedPixel(bullet.x, bullet.y)) {
+                    audio.onProjectileImpact();
+                }
                 it.remove();
                 continue;
             }
@@ -1134,6 +1123,7 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
                 }
                 if (distance(bullet.x, bullet.y, hero.x, hero.y) <= bullet.radius + hero.radius) {
                     damageHero(hero, bullet.damage);
+                    audio.onProjectileImpact();
                     hit = true;
                     break;
                 }
@@ -1150,6 +1140,7 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
                 }
                 if (distance(bullet.x, bullet.y, creep.x, creep.y) <= bullet.radius + creep.radius) {
                     damageCreepByHero(creep, bullet.damage);
+                    audio.onProjectileImpact();
                     hit = true;
                     break;
                 }
@@ -1162,6 +1153,7 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
                     }
                     if (distance(bullet.x, bullet.y, creep.x, creep.y) <= bullet.radius + creep.radius) {
                         damageCreepByHero(creep, bullet.damage);
+                        audio.onProjectileImpact();
                         hit = true;
                         break;
                     }
@@ -1175,6 +1167,7 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
                     }
                     if (distance(bullet.x, bullet.y, structure.x, structure.y) <= bullet.radius + structure.radius) {
                         damageStructure(structure, bullet.damage);
+                        audio.onProjectileImpact();
                         hit = true;
                         break;
                     }
@@ -1803,6 +1796,7 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
                 continue;
             }
 
+            audio.onStructureAttack();
             damageStructureTarget(structure, structure.attackTarget);
             structure.attackTimer = structure.attackCooldown;
         }
@@ -1932,7 +1926,7 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
         creep.lastHitByCreep = false;
         damageEntity(creep, damage);
         if (creep.hp <= 0) {
-            soundPlayer.play(SoundEffect.ENEMY_DOWN);
+            audio.onEnemyDown();
         }
     }
 
@@ -1952,7 +1946,7 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
         int previousHp = structure.hp;
         damageEntity(structure, damage);
         if (previousHp > 0 && structure.hp <= 0) {
-            soundPlayer.play(SoundEffect.ENEMY_DOWN);
+            audio.onEnemyDown();
         }
     }
 
@@ -1963,9 +1957,9 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
         hero.hitCooldown = 0.35;
         damageEntity(hero, damage);
         if (hero == player) {
-            soundPlayer.play(SoundEffect.PLAYER_HIT);
+            audio.onPlayerHit();
         } else if (hero.hp <= 0) {
-            soundPlayer.play(SoundEffect.ENEMY_DOWN);
+            audio.onEnemyDown();
         }
         if (hero.hp <= 0) {
             hero.hp = 0;
@@ -2085,11 +2079,11 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
             gameOver = true;
             victoryText = "Силы тьмы победили";
             player.state = AnimationState.DEAD;
-            soundPlayer.play(SoundEffect.DEFEAT);
+            audio.onDefeat();
         } else if (darkThrone.hp <= 0) {
             gameOver = true;
             victoryText = "Силы света победили";
-            soundPlayer.play(SoundEffect.VICTORY);
+            audio.onVictory();
         }
     }
 
@@ -2286,7 +2280,7 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
         }
 
         currentWeapon = weapon;
-        soundPlayer.play(SoundEffect.WEAPON_SWITCH);
+        audio.onWeaponSwitch();
         attackCooldown = Math.min(attackCooldown, 0.12);
         refreshPlayerAttackOrderForCurrentWeapon();
     }
@@ -4028,7 +4022,7 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
     @Override
     public void removeNotify() {
         gameTimer.stop();
-        soundPlayer.close();
+        audio.close();
         super.removeNotify();
     }
 

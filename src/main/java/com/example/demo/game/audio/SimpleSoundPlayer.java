@@ -39,13 +39,28 @@ public final class SimpleSoundPlayer implements AutoCloseable {
                 tone(980.0, 420.0, 0.110, 0.026, Wave.NOISE),
                 tone(620.0, 860.0, 0.055, 0.018, Wave.SINE)
         ));
-        sounds.put(SoundEffect.RANGED_ATTACK, sequence(
-                tone(920.0, 460.0, 0.090, 0.18, Wave.TRIANGLE),
-                tone(380.0, 300.0, 0.030, 0.08, Wave.SINE)
+        sounds.put(SoundEffect.PROJECTILE_SHOT, sequence(
+                tone(1280.0, 620.0, 0.050, 0.050, Wave.NOISE),
+                tone(940.0, 520.0, 0.070, 0.040, Wave.TRIANGLE),
+                tone(460.0, 360.0, 0.028, 0.020, Wave.SINE)
         ));
-        sounds.put(SoundEffect.MELEE_ATTACK, sequence(
-                tone(260.0, 120.0, 0.110, 0.17, Wave.SQUARE),
-                tone(180.0, 90.0, 0.040, 0.08, Wave.TRIANGLE)
+        sounds.put(SoundEffect.PROJECTILE_IMPACT, sequence(
+                tone(2200.0, 780.0, 0.020, 0.040, Wave.NOISE),
+                tone(980.0, 280.0, 0.050, 0.045, Wave.TRIANGLE),
+                tone(240.0, 180.0, 0.050, 0.028, Wave.SINE)
+        ));
+        sounds.put(SoundEffect.MELEE_SWING, sequence(
+                tone(520.0, 180.0, 0.070, 0.038, Wave.NOISE),
+                tone(280.0, 140.0, 0.085, 0.060, Wave.TRIANGLE)
+        ));
+        sounds.put(SoundEffect.MELEE_HIT, sequence(
+                tone(820.0, 240.0, 0.034, 0.050, Wave.NOISE),
+                tone(220.0, 120.0, 0.070, 0.055, Wave.SQUARE)
+        ));
+        sounds.put(SoundEffect.STRUCTURE_SHOT, sequence(
+                tone(720.0, 1120.0, 0.050, 0.034, Wave.NOISE),
+                tone(640.0, 420.0, 0.080, 0.032, Wave.SINE),
+                tone(330.0, 250.0, 0.060, 0.020, Wave.TRIANGLE)
         ));
         sounds.put(SoundEffect.PLAYER_HIT, sequence(
                 tone(240.0, 160.0, 0.080, 0.16, Wave.SQUARE),
