@@ -541,6 +541,8 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
         creep.waypointIndex = 1;
         creep.animPhase = random.nextDouble() * 3.0;
         creep.lookAngle = Math.atan2(next.y - start.y, next.x - start.x);
+        creep.attackVisualTargetX = creep.x;
+        creep.attackVisualTargetY = creep.y;
         creep.laneNavigationGoalIndex = -1;
         creep.laneRepathCooldown = 0.0;
         creep.deathAnimationTimer = 0.0;
@@ -2053,6 +2055,10 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
         unit.setLookAngle(Math.atan2(targetY - unit.getY(), targetX - unit.getX()));
         unit.setAttackAnimationTimer(UNIT_ATTACK_ANIMATION_DURATION);
         unit.setAnimPhase(0.0);
+        if (unit instanceof Creep creep) {
+            creep.attackVisualTargetX = targetX;
+            creep.attackVisualTargetY = targetY;
+        }
     }
 
     private void updateCreepAnimation(Creep creep, double dt) {
@@ -4142,37 +4148,132 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
         double progress = 1.0 - clamp(creep.attackAnimationTimer / UNIT_ATTACK_ANIMATION_DURATION, 0.0, 1.0);
         double dirX = Math.cos(creep.lookAngle);
         double dirY = Math.sin(creep.lookAngle);
+        int targetX = worldToScreenX(creep.attackVisualTargetX);
+        int targetY = worldToScreenY(creep.attackVisualTargetY);
 
         switch (creep.laneType) {
             case MELEE -> drawMeleeCreepAttackEffect(g2, creep, sx, sy, radius, progress);
-            case RANGED -> {
-                int startX = (int) Math.round(sx + dirX * radius * 0.9);
-                int startY = (int) Math.round(sy + dirY * radius * 0.9);
-                int endX = (int) Math.round(startX + dirX * (10.0 + progress * 10.0) * ZOOM);
-                int endY = (int) Math.round(startY + dirY * (10.0 + progress * 10.0) * ZOOM);
-                Stroke oldStroke = g2.getStroke();
-                g2.setColor(new Color(246, 222, 150, 185));
-                g2.setStroke(new BasicStroke((float) Math.max(1.4, 2.6 * (1.0 - progress)), BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
-                g2.drawLine(startX, startY, endX, endY);
-                g2.setColor(new Color(255, 246, 210, 220));
-                g2.fillOval(endX - 3, endY - 3, 6, 6);
-                g2.setStroke(oldStroke);
-            }
-            case CATAPULT -> {
-                double launchDistance = (8.0 + progress * 18.0) * ZOOM;
-                int stoneX = (int) Math.round(sx + dirX * (radius * 0.8 + launchDistance));
-                int stoneY = (int) Math.round(sy + dirY * (radius * 0.8 + launchDistance) - Math.sin(progress * Math.PI) * 8.0 * ZOOM);
-                g2.setColor(new Color(96, 84, 70, 210));
-                g2.fillOval(stoneX - 5, stoneY - 5, 10, 10);
-                g2.setColor(new Color(188, 160, 118, 180));
-                g2.drawLine(
-                        (int) Math.round(sx + dirX * radius * 0.6),
-                        (int) Math.round(sy + dirY * radius * 0.6),
-                        stoneX,
-                        stoneY
-                );
-            }
+            case RANGED -> drawRangedCreepAttackEffect(g2, creep, sx, sy, radius, targetX, targetY, dirX, dirY, progress);
+            case CATAPULT -> drawCatapultCreepAttackEffect(g2, creep, sx, sy, radius, targetX, targetY, dirX, dirY, progress);
         }
+    }
+
+    private void drawRangedCreepAttackEffect(Graphics2D g2,
+                                             Creep creep,
+                                             int sx,
+                                             int sy,
+                                             int radius,
+                                             int targetX,
+                                             int targetY,
+                                             double dirX,
+                                             double dirY,
+                                             double progress) {
+        int startX = (int) Math.round(sx + dirX * radius * 0.82);
+        int startY = (int) Math.round(sy + dirY * radius * 0.82);
+        double travel = smoothstep(clamp(progress / 0.78, 0.0, 1.0));
+        int boltX = (int) Math.round(startX + (targetX - startX) * travel);
+        int boltY = (int) Math.round(startY + (targetY - startY) * travel);
+
+        if (travel < 0.995) {
+            int glowR = Math.max(4, (int) Math.round((3.6 + (1.0 - progress) * 2.4) * ZOOM));
+            g2.setColor(new Color(246, 222, 150, 90));
+            g2.fillOval(boltX - glowR - 3, boltY - glowR - 3, (glowR + 3) * 2, (glowR + 3) * 2);
+            g2.setColor(creep.team == Team.LIGHT
+                    ? new Color(255, 235, 182, 235)
+                    : new Color(255, 176, 112, 228));
+            g2.fillOval(boltX - glowR, boltY - glowR, glowR * 2, glowR * 2);
+            g2.setColor(new Color(255, 250, 232, 230));
+            g2.fillOval(boltX - Math.max(2, glowR / 2), boltY - Math.max(2, glowR / 2), Math.max(4, glowR), Math.max(4, glowR));
+        }
+
+        if (progress >= 0.56) {
+            double burst = clamp((progress - 0.56) / 0.44, 0.0, 1.0);
+            drawMagicImpactExplosion(g2, targetX, targetY, burst, creep.team);
+        }
+    }
+
+    private void drawCatapultCreepAttackEffect(Graphics2D g2,
+                                               Creep creep,
+                                               int sx,
+                                               int sy,
+                                               int radius,
+                                               int targetX,
+                                               int targetY,
+                                               double dirX,
+                                               double dirY,
+                                               double progress) {
+        int startX = (int) Math.round(sx + dirX * radius * 0.7);
+        int startY = (int) Math.round(sy + dirY * radius * 0.7);
+        double travel = smoothstep(clamp(progress / 0.82, 0.0, 1.0));
+        double arcHeight = Math.sin(travel * Math.PI) * 12.0 * ZOOM;
+        int stoneX = (int) Math.round(startX + (targetX - startX) * travel);
+        int stoneY = (int) Math.round(startY + (targetY - startY) * travel - arcHeight);
+
+        if (travel < 0.995) {
+            int stoneR = Math.max(4, (int) Math.round(4.2 * ZOOM));
+            g2.setColor(new Color(74, 60, 46, 80));
+            g2.fillOval(stoneX - stoneR - 1, stoneY - stoneR + 2, (stoneR + 1) * 2, (stoneR + 1) * 2);
+            g2.setColor(new Color(104, 92, 78, 230));
+            g2.fillOval(stoneX - stoneR, stoneY - stoneR, stoneR * 2, stoneR * 2);
+            g2.setColor(new Color(158, 140, 118, 210));
+            g2.fillOval(stoneX - stoneR / 2, stoneY - stoneR / 2 - 1, Math.max(3, stoneR), Math.max(3, stoneR));
+        }
+
+        if (progress >= 0.6) {
+            double burst = clamp((progress - 0.6) / 0.4, 0.0, 1.0);
+            drawCatapultImpactExplosion(g2, targetX, targetY, burst, creep.team);
+        }
+    }
+
+    private void drawMagicImpactExplosion(Graphics2D g2, int centerX, int centerY, double progress, Team team) {
+        double fade = 1.0 - progress;
+        int outerR = Math.max(6, (int) Math.round((5.0 + progress * 11.0) * ZOOM));
+        int innerR = Math.max(3, (int) Math.round((2.0 + progress * 4.0) * ZOOM));
+        Color glow = team == Team.LIGHT
+                ? new Color(255, 236, 186, Math.max(0, (int) Math.round(160 * fade)))
+                : new Color(255, 170, 118, Math.max(0, (int) Math.round(150 * fade)));
+        g2.setColor(glow);
+        g2.fillOval(centerX - outerR, centerY - outerR, outerR * 2, outerR * 2);
+        g2.setColor(new Color(255, 248, 228, Math.max(0, (int) Math.round(210 * fade))));
+        g2.fillOval(centerX - innerR, centerY - innerR, innerR * 2, innerR * 2);
+
+        Stroke oldStroke = g2.getStroke();
+        g2.setStroke(new BasicStroke((float) Math.max(1.0, 2.4 * fade), BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+        g2.setColor(new Color(255, 247, 218, Math.max(0, (int) Math.round(170 * fade))));
+        for (int i = 0; i < 4; i++) {
+            double angle = Math.PI / 4.0 + i * Math.PI / 2.0;
+            int rayX = (int) Math.round(centerX + Math.cos(angle) * outerR * (0.55 + progress * 0.35));
+            int rayY = (int) Math.round(centerY + Math.sin(angle) * outerR * (0.55 + progress * 0.35));
+            g2.drawLine(centerX, centerY, rayX, rayY);
+        }
+        g2.setStroke(oldStroke);
+    }
+
+    private void drawCatapultImpactExplosion(Graphics2D g2, int centerX, int centerY, double progress, Team team) {
+        double fade = 1.0 - progress;
+        int dustR = Math.max(8, (int) Math.round((7.0 + progress * 13.0) * ZOOM));
+        g2.setColor(new Color(134, 118, 96, Math.max(0, (int) Math.round(138 * fade))));
+        g2.fillOval(centerX - dustR, centerY - dustR / 2, dustR * 2, dustR);
+        g2.setColor(team == Team.LIGHT
+                ? new Color(255, 226, 170, Math.max(0, (int) Math.round(120 * fade)))
+                : new Color(236, 148, 108, Math.max(0, (int) Math.round(120 * fade))));
+        g2.fillOval(centerX - dustR / 2, centerY - dustR / 2 - 2, dustR, dustR);
+
+        Stroke oldStroke = g2.getStroke();
+        g2.setStroke(new BasicStroke((float) Math.max(1.0, 2.2 * fade), BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+        g2.setColor(new Color(188, 164, 132, Math.max(0, (int) Math.round(170 * fade))));
+        for (int i = 0; i < 5; i++) {
+            double angle = -Math.PI * 0.92 + i * (Math.PI * 0.46);
+            int shardX = (int) Math.round(centerX + Math.cos(angle) * dustR * (0.65 + progress * 0.45));
+            int shardY = (int) Math.round(centerY + Math.sin(angle) * dustR * (0.35 + progress * 0.4));
+            g2.drawLine(centerX, centerY, shardX, shardY);
+        }
+        g2.setStroke(oldStroke);
+    }
+
+    private double smoothstep(double value) {
+        double t = clamp(value, 0.0, 1.0);
+        return t * t * (3.0 - 2.0 * t);
     }
 
     private void drawMeleeCreepAttackEffect(Graphics2D g2, Creep creep, int sx, int sy, int radius, double progress) {

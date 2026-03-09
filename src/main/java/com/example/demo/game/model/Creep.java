@@ -37,6 +37,8 @@ public class Creep implements CombatUnit {
     public double animPhase;
     public double lookAngle;
     public double attackAnimationTimer;
+    public double attackVisualTargetX;
+    public double attackVisualTargetY;
     public double deathAnimationTimer;
     public boolean deathRewardsGranted;
     public AnimationState state = AnimationState.IDLE;
