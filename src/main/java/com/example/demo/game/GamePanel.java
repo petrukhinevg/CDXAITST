@@ -125,6 +125,8 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
     private static final double CLICK_MARKER_INNER_FADE_DURATION = 0.45;
     private static final double CLICK_MARKER_LIFETIME = CLICK_MARKER_OUTER_FADE_DURATION + CLICK_MARKER_INNER_FADE_DURATION;
     private static final double CLICK_MARKER_SCALE = 0.5;
+    private static final int HEALTH_BAR_TICK_HP = 250;
+    private static final double DENY_INDICATOR_DURATION = 0.9;
     private static final double SELECTED_TARGET_GLOW_SPEED = 5.4;
     private static final double ATTACK_RANGE_BALANCE_SCALE = 1.0 / 1.25;
 
@@ -473,6 +475,7 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
         creep.deathAnimationTimer = 0.0;
         creep.deathRewardsGranted = false;
         creep.deniedByHero = false;
+        creep.denyIndicatorTimer = 0.0;
         laneCreeps.add(creep);
     }
 
@@ -2141,6 +2144,7 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
         creep.attackAnimationTimer = 0.0;
         creep.moving = false;
         creep.animPhase += dt * 4.0;
+        creep.denyIndicatorTimer = Math.max(0.0, creep.denyIndicatorTimer - dt);
         creep.deathAnimationTimer = Math.max(0.0, creep.deathAnimationTimer - dt);
         return creep.deathAnimationTimer <= 0.0;
     }
@@ -2306,6 +2310,7 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
         creep.state = AnimationState.DEAD;
         creep.animPhase = 0.0;
         creep.deathAnimationTimer = UNIT_DEATH_DISSOLVE_DURATION;
+        creep.denyIndicatorTimer = creep.deniedByHero ? DENY_INDICATOR_DURATION : 0.0;
         creep.deathRewardsGranted = false;
         clearCreepLanePath(creep);
     }
@@ -3497,6 +3502,8 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
             drawSelectedStructureHighlight(g2, s, sx, sy, r);
 
             drawHealthBar(g2, sx, sy - r - 12, 54, 7,
+                    s.hp,
+                    s.maxHp,
                     (double) s.hp / s.maxHp,
                     s.team == Team.LIGHT ? new Color(88, 168, 255) : new Color(248, 96, 88));
         }
@@ -3863,8 +3870,11 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
 
         drawLaneCreepAttackEffect(g2, creep, sx, renderSy, r);
         drawSelectedCreepHighlight(g2, creep, sx, sy, renderSy, r);
+        drawDenyIndicator(g2, creep, sx, renderSy, r);
 
         drawHealthBar(g2, sx, renderSy - r - 10, 28, 5,
+                creep.hp,
+                creep.maxHp,
                 (double) creep.hp / creep.maxHp,
                 creep.team == Team.LIGHT ? new Color(76, 214, 104) : new Color(241, 94, 85));
     }
@@ -3957,6 +3967,27 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
                 progress,
                 deathVaporColor(creep.team)
         );
+        drawDenyIndicator(g2, creep, sx, bodyCenterY, radius);
+    }
+
+    private void drawDenyIndicator(Graphics2D g2, Creep creep, int centerX, int centerY, int radius) {
+        if (creep.denyIndicatorTimer <= 0.0) {
+            return;
+        }
+
+        double progress = 1.0 - clamp(creep.denyIndicatorTimer / DENY_INDICATOR_DURATION, 0.0, 1.0);
+        int alpha = (int) Math.round(225 * (1.0 - progress));
+        int lift = (int) Math.round(progress * 8.0 * ZOOM);
+        int x = centerX;
+        int y = centerY - radius - (int) Math.round(12.0 * ZOOM) - lift;
+
+        Font oldFont = g2.getFont();
+        g2.setFont(oldFont.deriveFont(Font.BOLD, (float) Math.round(12.0 * ZOOM)));
+        g2.setColor(new Color(72, 6, 6, Math.max(0, alpha / 2)));
+        g2.drawString("!", x - (int) Math.round(1.5 * ZOOM), y + 1);
+        g2.setColor(new Color(255, 74, 74, Math.max(0, alpha)));
+        g2.drawString("!", x - (int) Math.round(2.0 * ZOOM), y);
+        g2.setFont(oldFont);
     }
 
     private void drawLaneCreepShadow(Graphics2D g2, Creep creep, int sx, int sy, int radius) {
@@ -5047,6 +5078,8 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
                                int y,
                                int width,
                                int height,
+                               int hp,
+                               int maxHp,
                                double ratio,
                                Color fillColor) {
         int x = centerX - width / 2;
@@ -5058,6 +5091,7 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
         int fillW = (int) Math.round((width - 2) * ratio);
         g2.setColor(fillColor);
         g2.fillRoundRect(x + 1, y + 1, fillW, height - 2, 5, 5);
+        drawHealthBarTicks(g2, x, y, width, height, maxHp);
 
         g2.setColor(new Color(220, 220, 220, 170));
         g2.drawRoundRect(x, y, width, height, 6, 6);
@@ -5087,9 +5121,27 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
 
         g2.setColor(new Color(223, 79, 77));
         g2.fillRoundRect(x + 1, y + 1, fillW, height - 2, 5, 5);
+        drawHealthBarTicks(g2, x, y, width, height, player.maxHp);
 
         g2.setColor(new Color(220, 220, 220, 170));
         g2.drawRoundRect(x, y, width, height, 6, 6);
+    }
+
+    private void drawHealthBarTicks(Graphics2D g2, int x, int y, int width, int height, int maxHp) {
+        if (maxHp < HEALTH_BAR_TICK_HP * 2) {
+            return;
+        }
+
+        int innerX = x + 1;
+        int innerY = y + 1;
+        int innerWidth = width - 2;
+        int innerHeight = height - 2;
+        g2.setColor(new Color(22, 18, 16, 150));
+        for (int hpMark = HEALTH_BAR_TICK_HP; hpMark < maxHp; hpMark += HEALTH_BAR_TICK_HP) {
+            double ratio = hpMark / (double) maxHp;
+            int tickX = innerX + (int) Math.round(innerWidth * ratio);
+            g2.drawLine(tickX, innerY, tickX, innerY + innerHeight - 1);
+        }
     }
 
     private void queuePlayerDamageBar(int damageTaken) {

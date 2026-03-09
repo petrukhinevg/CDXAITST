@@ -40,6 +40,7 @@ public class Creep implements CombatUnit {
     public double attackVisualTargetX;
     public double attackVisualTargetY;
     public double deathAnimationTimer;
+    public double denyIndicatorTimer;
     public boolean deathRewardsGranted;
     public AnimationState state = AnimationState.IDLE;
     public final List<Point> laneNavigationPath = new ArrayList<>();
