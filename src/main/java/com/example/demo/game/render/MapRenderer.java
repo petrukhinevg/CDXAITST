@@ -58,7 +58,7 @@ public class MapRenderer {
             case GRASS -> new Color(102, 146, 86);
             case GRASS_ALT -> new Color(88, 131, 74);
             case DIRT -> new Color(125, 103, 74);
-            case LANE -> new Color(145, 124, 90);
+            case LANE -> new Color(96, 87, 78);
             case HIGH_GROUND -> new Color(126, 160, 102);
             case BASE -> new Color(126, 118, 108);
         };
@@ -80,10 +80,8 @@ public class MapRenderer {
         g2.setColor(shift(base, variation * 2));
         g2.fillRect(sx, sy, tile, tile);
 
-        if (type == GroundKind.LANE) {
-            g2.setColor(new Color(175, 151, 112, 120));
-            g2.drawLine(sx + 2, sy + 8, sx + tile - 3, sy + 8);
-            g2.drawLine(sx + 2, sy + 16, sx + tile - 3, sy + 16);
+        if (map.isLane(tileX, tileY)) {
+            drawLaneMarkings(g2, sx, sy, tile, noise, false);
         } else if (type == GroundKind.GRASS || type == GroundKind.GRASS_ALT || type == GroundKind.HIGH_GROUND || type == GroundKind.FOREST) {
             g2.setColor(new Color(54, 95, 45, 70));
             int bladeCount = 2 + (noise & 1);
@@ -108,12 +106,31 @@ public class MapRenderer {
         g2.drawLine(sx + 4, sy + 14, sx + tile - 5, sy + 14);
 
         if (map.isLane(tileX, tileY)) {
-            g2.setColor(new Color(196, 186, 152, 70));
-            g2.drawLine(sx + 2, sy + 8, sx + tile - 3, sy + 8);
-            g2.drawLine(sx + 2, sy + 16, sx + tile - 3, sy + 16);
-            g2.setColor(new Color(48, 92, 128, 80));
-            g2.drawLine(sx + 1, sy + 12, sx + tile - 2, sy + 12);
+            drawLaneMarkings(g2, sx, sy, tile, tileNoise(tileX, tileY), true);
         }
+    }
+
+    private void drawLaneMarkings(Graphics2D g2, int sx, int sy, int tile, int noise, boolean overWater) {
+        int baseShift = ((noise >> 3) & 3) - 1;
+        int accentShift = ((noise >> 5) & 3) - 1;
+
+        Color laneBase = shift(new Color(82, 75, 68), baseShift * 4);
+        Color laneAccent = shift(new Color(118, 108, 96), accentShift * 4);
+        Color laneCenter = shift(new Color(62, 56, 50), baseShift * 3);
+
+        int baseAlpha = overWater ? 155 : 120;
+        int accentAlpha = overWater ? 220 : 210;
+        int centerAlpha = overWater ? 170 : 155;
+
+        g2.setColor(withAlpha(laneBase, baseAlpha));
+        g2.fillRect(sx + 1, sy + 5, tile - 2, tile - 10);
+
+        g2.setColor(withAlpha(laneAccent, accentAlpha));
+        g2.drawLine(sx + 2, sy + 8, sx + tile - 3, sy + 8);
+        g2.drawLine(sx + 2, sy + 16, sx + tile - 3, sy + 16);
+
+        g2.setColor(withAlpha(laneCenter, centerAlpha));
+        g2.drawLine(sx + 1, sy + 12, sx + tile - 2, sy + 12);
     }
 
     private void drawElevationEdges(Graphics2D g2, GameMap map) {
@@ -250,6 +267,10 @@ public class MapRenderer {
         int g = clampColor(base.getGreen() + delta);
         int b = clampColor(base.getBlue() + delta);
         return new Color(r, g, b);
+    }
+
+    private Color withAlpha(Color color, int alpha) {
+        return new Color(color.getRed(), color.getGreen(), color.getBlue(), alpha);
     }
 
     private int clampColor(int value) {

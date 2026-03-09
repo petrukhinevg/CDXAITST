@@ -24,6 +24,7 @@ public final class HudRenderer {
                         int panelHeight,
                         double zoom,
                         Player player,
+                        List<Player> heroes,
                         WeaponType currentWeapon,
                         List<HeroAbility> abilities,
                         Structure lightThrone,
@@ -58,7 +59,6 @@ public final class HudRenderer {
     }
 
     public void draw(Graphics2D g2, Model model) {
-        drawObjectivesPanel(g2, model);
         drawProgressPanel(g2, model);
         drawMetaPanel(g2, model);
         drawMiniMap(g2, model);
@@ -74,77 +74,57 @@ public final class HudRenderer {
         }
     }
 
-    private void drawObjectivesPanel(Graphics2D g2, Model model) {
-        drawPanel(g2, 16, 16, 278, 102);
-        g2.setColor(Color.WHITE);
-        g2.setFont(new Font("SansSerif", Font.BOLD, 16));
-        g2.drawString("Объекты", 30, 40);
-        g2.setFont(new Font("SansSerif", Font.PLAIN, 13));
-
-        g2.drawString("Трон света: " + Math.max(0, model.lightThrone().hp), 30, 62);
-        drawBar(g2, 30, 68, 236, 10,
-                model.lightThrone().maxHp == 0 ? 0.0 : (double) model.lightThrone().hp / model.lightThrone().maxHp,
-                new Color(90, 176, 255), new Color(32, 55, 83), new Color(190, 190, 190));
-
-        g2.drawString("Трон тьмы: " + Math.max(0, model.darkThrone().hp), 30, 92);
-        drawBar(g2, 30, 98, 236, 10,
-                model.darkThrone().maxHp == 0 ? 0.0 : (double) model.darkThrone().hp / model.darkThrone().maxHp,
-                new Color(237, 95, 88), new Color(83, 34, 31), new Color(190, 190, 190));
-    }
-
     private void drawProgressPanel(Graphics2D g2, Model model) {
-        int panelX = 16;
-        int panelY = model.panelHeight() - 164;
-        drawPanel(g2, panelX, panelY, 344, 148);
+        int panelW = Math.min(560, Math.max(420, model.panelWidth() - 420));
+        int panelH = 148;
+        int panelX = (model.panelWidth() - panelW) / 2;
+        int panelY = model.panelHeight() - panelH - 18;
 
-        g2.setColor(Color.WHITE);
-        g2.setFont(new Font("SansSerif", Font.BOLD, 16));
-        g2.drawString("Прогресс", panelX + 14, panelY + 24);
-        g2.setFont(new Font("SansSerif", Font.PLAIN, 13));
+        g2.setFont(new Font("SansSerif", Font.BOLD, 18));
+        drawHudText(g2, "Прогресс", panelX, panelY + 18);
+        g2.setFont(new Font("SansSerif", Font.PLAIN, 14));
 
-        g2.drawString("Оружие: " + model.currentWeapon().displayName(), panelX + 14, panelY + 48);
-
-        g2.drawString("XP: " + model.player().xp + " / " + model.player().xpToNextLevel, panelX + 14, panelY + 74);
-        drawBar(g2, panelX + 14, panelY + 82, 314, 12,
+        drawHudText(g2, "Оружие: " + model.currentWeapon().displayName(), panelX, panelY + 44);
+        drawHudText(g2, "XP: " + model.player().xp + " / " + model.player().xpToNextLevel, panelX, panelY + 70);
+        drawBar(g2, panelX, panelY + 80, panelW, 13,
                 model.player().xpToNextLevel == 0 ? 0.0 : (double) model.player().xp / model.player().xpToNextLevel,
                 new Color(91, 190, 255), new Color(31, 67, 93), new Color(190, 190, 190));
 
         g2.setFont(new Font("SansSerif", Font.PLAIN, 12));
-        int abilityX = panelX + 14;
+        int slotGap = 10;
         int abilityY = panelY + 104;
-        int abilityW = 98;
+        int abilityW = (panelW - slotGap * Math.max(0, model.abilities().size() - 1)) / Math.max(1, model.abilities().size());
         int abilityH = 28;
+        int abilityX = panelX;
         for (HeroAbility ability : model.abilities()) {
             drawAbilitySlot(g2, abilityX, abilityY, abilityW, abilityH, ability);
-            abilityX += abilityW + 10;
+            abilityX += abilityW + slotGap;
         }
     }
 
     private void drawMetaPanel(Graphics2D g2, Model model) {
-        int panelW = 278;
-        int panelH = 118;
-        int panelX = model.panelWidth() - panelW - 16;
-        int panelY = model.panelHeight() - panelH - 16;
-        drawPanel(g2, panelX, panelY, panelW, panelH);
+        int panelX = 18;
+        int panelY = 20;
+        int columnGap = 42;
+        int rightColumnX = panelX + 220 + columnGap;
 
-        g2.setColor(Color.WHITE);
-        g2.setFont(new Font("SansSerif", Font.BOLD, 16));
-        g2.drawString("Сводка", panelX + 14, panelY + 24);
-        g2.setFont(new Font("SansSerif", Font.PLAIN, 13));
-        g2.drawString("Крипы на линиях: " + model.laneCreepCount(), panelX + 14, panelY + 48);
-        g2.drawString("Нейтралы: " + model.neutralCreepCount(), panelX + 14, panelY + 66);
-        g2.drawString("Фраги героя: " + model.kills(), panelX + 14, panelY + 84);
-        g2.drawString("FPS: " + model.currentFps() + " / " + model.targetFps(), panelX + 14, panelY + 102);
+        g2.setFont(new Font("SansSerif", Font.BOLD, 18));
+        drawHudText(g2, "Сводка", panelX, panelY + 18);
+        g2.setFont(new Font("SansSerif", Font.PLAIN, 14));
+        drawHudText(g2, "Крипы на линиях: " + model.laneCreepCount(), panelX, panelY + 44);
+        drawHudText(g2, "Нейтралы: " + model.neutralCreepCount(), panelX, panelY + 66);
+        drawHudText(g2, "Фраги героя: " + model.kills(), panelX, panelY + 88);
+        drawHudText(g2, "FPS: " + model.currentFps() + " / " + model.targetFps(), panelX, panelY + 110);
 
-        g2.drawString("1 Камень  2 Лук  3 Меч", panelX + 132, panelY + 48);
-        g2.drawString("WASD движение", panelX + 132, panelY + 66);
-        g2.drawString("ЛКМ атака", panelX + 132, panelY + 84);
-        g2.drawString("Q / E / R способности", panelX + 132, panelY + 102);
+        drawHudText(g2, "1 Камень  2 Лук  3 Меч", rightColumnX, panelY + 44);
+        drawHudText(g2, "WASD движение", rightColumnX, panelY + 66);
+        drawHudText(g2, "ЛКМ атака", rightColumnX, panelY + 88);
+        drawHudText(g2, "Q / E / R способности", rightColumnX, panelY + 110);
     }
 
     private void drawMiniMap(Graphics2D g2, Model model) {
-        int panelX = model.panelWidth() - MINIMAP_SIZE - 16;
-        int panelY = 16;
+        int panelX = 16;
+        int panelY = model.panelHeight() - MINIMAP_SIZE - 16;
         int mapX = panelX + MINIMAP_PAD;
         int mapY = panelY + MINIMAP_PAD;
         int mapW = MINIMAP_SIZE - MINIMAP_PAD * 2;
@@ -193,10 +173,17 @@ public final class HudRenderer {
             g2.fillRect(x, y, 2, 2);
         }
 
-        int px = mapX + (int) Math.round(model.player().x * scaleX);
-        int py = mapY + (int) Math.round(model.player().y * scaleY);
-        g2.setColor(new Color(255, 248, 180));
-        g2.fillOval(px - 3, py - 3, 6, 6);
+        for (Player hero : model.heroes()) {
+            if (hero.hp <= 0) {
+                continue;
+            }
+            int px = mapX + (int) Math.round(hero.x * scaleX);
+            int py = mapY + (int) Math.round(hero.y * scaleY);
+            g2.setColor(hero == model.player()
+                    ? new Color(255, 248, 180)
+                    : hero.team == Team.LIGHT ? new Color(164, 222, 255) : new Color(255, 140, 132));
+            g2.fillOval(px - 3, py - 3, 6, 6);
+        }
 
         int camX = mapX + (int) Math.round(model.cameraX() * scaleX);
         int camY = mapY + (int) Math.round(model.cameraY() * scaleY);
@@ -234,6 +221,13 @@ public final class HudRenderer {
         g2.fillRoundRect(x, y, width, height, 12, 12);
         g2.setColor(new Color(230, 230, 230, 120));
         g2.drawRoundRect(x, y, width, height, 12, 12);
+    }
+
+    private void drawHudText(Graphics2D g2, String text, int x, int y) {
+        g2.setColor(new Color(0, 0, 0, 120));
+        g2.drawString(text, x + 1, y + 1);
+        g2.setColor(Color.WHITE);
+        g2.drawString(text, x, y);
     }
 
     private void drawAbilitySlot(Graphics2D g2, int x, int y, int width, int height, HeroAbility ability) {

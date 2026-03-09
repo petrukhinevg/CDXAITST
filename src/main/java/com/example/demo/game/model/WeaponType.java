@@ -2,7 +2,7 @@ package com.example.demo.game.model;
 
 public enum WeaponType {
     STONE("Камень", 12, 0.20, true, 430.0, 0.29, 4.5, 0xFFCDB27A, 0.0, 0.0, 0.14),
-    BOW("Лук", 18, 0.30, true, 650.0, 0.38, 3.2, 0xFFE7D2A2, 0.0, 0.0, 0.18),
+    BOW("Лук", 18, 0.30, true, 650.0, 0.25333333333333335, 3.2, 0xFFE7D2A2, 0.0, 0.0, 0.18),
     SWORD("Меч", 27, 0.40, false, 0.0, 0.0, 0.0, 0x00000000, 62.0, 100.0, 0.20);
 
     private final String displayName;

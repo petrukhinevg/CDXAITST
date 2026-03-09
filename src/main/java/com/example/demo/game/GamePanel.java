@@ -56,6 +56,7 @@ import java.awt.event.MouseMotionListener;
 public class GamePanel extends JPanel implements KeyListener, MouseMotionListener, MouseListener {
     private static final double ZOOM = 2.0;
     private static final double HERO_RENDER_SCALE = 1.18;
+    private static final double HERO_RESPAWN_TIME = 1.0;
     private static final double EXPERIENCE_ORB_LIFETIME = 15.0;
     private static final double EXPERIENCE_MAGNET_RADIUS = 140.0;
     private static final double EXPERIENCE_PICKUP_RADIUS = 38.0;
@@ -70,6 +71,7 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
     private final SpriteLibrary sprites = SpriteLibrary.loadDefault();
 
     private final Player player = new Player();
+    private final List<Player> heroes = new ArrayList<>();
     private final Team heroTeam = Team.LIGHT;
 
     private final List<Bullet> bullets = new ArrayList<>();
@@ -102,7 +104,6 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
     private double cameraY;
 
     private double attackCooldown;
-    private double playerHitCooldown;
     private double muzzleFlashTime;
     private double swordSwingTime;
     private double laneWaveTimer;
@@ -149,26 +150,12 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
         initNeutralCreeps();
 
         Point playerStart = mapBlueprint.playerStart();
-        player.x = map.tileCenter(playerStart.x);
-        player.y = map.tileCenter(playerStart.y);
-        player.radius = 14.5;
-        player.team = heroTeam;
-        player.maxHp = 120;
-        player.hp = player.maxHp;
-        player.defense = 2;
-        player.level = 1;
-        player.xp = 0;
-        player.xpToNextLevel = 50;
-        player.animPhase = 0.0;
-        player.attackTimer = 0.0;
-        player.attackAnimationTimer = 0.0;
-        player.state = AnimationState.IDLE;
+        initHeroes(playerStart);
 
         currentWeapon = WeaponType.STONE;
         initHeroAbilities();
 
         attackCooldown = 0.0;
-        playerHitCooldown = 0.0;
         muzzleFlashTime = 0.0;
         swordSwingTime = 0.0;
         laneWaveTimer = 15.0;
@@ -186,6 +173,35 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
         framesThisSecond = 0;
         currentFps = 0;
         requestFocusInWindow();
+    }
+
+    private void initHeroes(Point playerStart) {
+        heroes.clear();
+        configureHero(player, heroTeam, playerStart);
+        heroes.add(player);
+    }
+
+    private void configureHero(Player hero, Team team, Point startTile) {
+        hero.x = map.tileCenter(startTile.x);
+        hero.y = map.tileCenter(startTile.y);
+        hero.spawnX = hero.x;
+        hero.spawnY = hero.y;
+        hero.radius = 14.5;
+        hero.team = team;
+        hero.maxHp = 120;
+        hero.hp = hero.maxHp;
+        hero.defense = 2;
+        hero.level = 1;
+        hero.xp = 0;
+        hero.xpToNextLevel = 50;
+        hero.moving = false;
+        hero.animPhase = 0.0;
+        hero.aimAngle = 0.0;
+        hero.hitCooldown = 0.0;
+        hero.respawnTimer = 0.0;
+        hero.attackTimer = 0.0;
+        hero.attackAnimationTimer = 0.0;
+        hero.state = AnimationState.IDLE;
     }
 
     private void regenerateMap() {
@@ -347,12 +363,21 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
 
     private void updateWorld(double dt) {
         attackCooldown = Math.max(0.0, attackCooldown - dt);
-        playerHitCooldown = Math.max(0.0, playerHitCooldown - dt);
         muzzleFlashTime = Math.max(0.0, muzzleFlashTime - dt);
         swordSwingTime = Math.max(0.0, swordSwingTime - dt);
 
-        player.attackTimer = Math.max(0.0, player.attackTimer - dt);
-        player.attackAnimationTimer = Math.max(0.0, player.attackAnimationTimer - dt);
+        for (Player hero : heroes) {
+            if (hero.hp <= 0) {
+                hero.respawnTimer = Math.max(0.0, hero.respawnTimer - dt);
+                if (!gameOver && hero.respawnTimer <= 0.0) {
+                    respawnHero(hero);
+                }
+                continue;
+            }
+            hero.hitCooldown = Math.max(0.0, hero.hitCooldown - dt);
+            hero.attackTimer = Math.max(0.0, hero.attackTimer - dt);
+            hero.attackAnimationTimer = Math.max(0.0, hero.attackAnimationTimer - dt);
+        }
 
         for (HeroAbility ability : heroAbilities) {
             ability.tick(dt);
@@ -369,7 +394,7 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
         player.aimAngle = Math.atan2(worldMouseY - player.y, worldMouseX - player.x);
 
         boolean moved = false;
-        if (!gameOver) {
+        if (!gameOver && player.hp > 0) {
             moved = movePlayer(dt);
             if (attackMouseDown && attackCooldown <= 0.0) {
                 attackWithCurrentWeapon();
@@ -384,19 +409,18 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
         updateStructures(dt);
         updateExperienceOrbs(dt);
 
-        if (!gameOver && player.hp <= 0) {
-            gameOver = true;
-            victoryText = "Силы тьмы победили";
-            player.state = AnimationState.DEAD;
-            player.animPhase = 0.0;
-        }
-
         checkVictory();
         centerCameraOnPlayer();
     }
 
     private void updatePlayerAnimation(double dt, boolean moved) {
         player.moving = moved;
+
+        if (player.hp <= 0) {
+            player.state = AnimationState.DEAD;
+            player.animPhase += dt * 7.0;
+            return;
+        }
 
         if (gameOver) {
             player.state = AnimationState.DEAD;
@@ -420,6 +444,10 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
     }
 
     private boolean movePlayer(double dt) {
+        if (player.hp <= 0) {
+            return false;
+        }
+
         double inputX = 0.0;
         double inputY = 0.0;
         if (up) inputY -= 1.0;
@@ -437,6 +465,19 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
 
         double speed = 215.0;
         return moveCombatUnit(player, inputX * speed * dt, inputY * speed * dt);
+    }
+
+    private void respawnHero(Player hero) {
+        hero.x = hero.spawnX;
+        hero.y = hero.spawnY;
+        hero.hp = hero.maxHp;
+        hero.moving = false;
+        hero.hitCooldown = 0.0;
+        hero.respawnTimer = 0.0;
+        hero.attackTimer = 0.0;
+        hero.attackAnimationTimer = 0.0;
+        hero.state = AnimationState.IDLE;
+        hero.animPhase = 0.0;
     }
 
     private void attackWithCurrentWeapon() {
@@ -472,6 +513,12 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
 
     private void performMeleeAttack(WeaponType weapon) {
         double arcHalf = Math.toRadians(weapon.meleeArcDegrees() / 2.0);
+
+        for (Player hero : heroes) {
+            if (isHostileHero(hero) && inMeleeArc(hero.x, hero.y, weapon.meleeRange() + hero.radius, arcHalf)) {
+                damageHero(hero, weapon.damage());
+            }
+        }
 
         for (Creep creep : laneCreeps) {
             if (isHostileCreep(creep) && inMeleeArc(creep.x, creep.y, weapon.meleeRange() + creep.radius, arcHalf)) {
@@ -520,6 +567,22 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
             }
 
             boolean hit = false;
+            for (Player hero : heroes) {
+                if (!isHostileHero(hero)) {
+                    continue;
+                }
+                if (distance(bullet.x, bullet.y, hero.x, hero.y) <= bullet.radius + hero.radius) {
+                    damageHero(hero, bullet.damage);
+                    hit = true;
+                    break;
+                }
+            }
+
+            if (hit) {
+                it.remove();
+                continue;
+            }
+
             for (Creep creep : laneCreeps) {
                 if (!isHostileCreep(creep) || creep.hp <= 0) {
                     continue;
@@ -584,8 +647,9 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
                 continue;
             }
 
-            if (shouldLaneCreepAttackHero(creep)) {
-                engageHeroTarget(creep, dt);
+            Player heroTarget = findLaneHeroTarget(creep);
+            if (heroTarget != null) {
+                engageHeroTarget(creep, heroTarget, dt);
                 updateCreepAnimation(creep, dt);
                 continue;
             }
@@ -630,17 +694,17 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
         }
     }
 
-    private void engageHeroTarget(Creep creep, double dt) {
-        double dist = distance(creep.x, creep.y, player.x, player.y);
-        if (dist > creep.attackRange + player.radius) {
-            moveTowards(creep, player.x, player.y, creep.moveSpeed * dt);
+    private void engageHeroTarget(Creep creep, Player hero, double dt) {
+        double dist = distance(creep.x, creep.y, hero.x, hero.y);
+        if (dist > creep.attackRange + hero.radius) {
+            moveTowards(creep, hero.x, hero.y, creep.moveSpeed * dt);
             return;
         }
 
         if (creep.attackTimer <= 0.0) {
-            damagePlayer(creep.damage);
+            damageHero(hero, creep.damage);
             creep.attackTimer = creep.attackCooldown;
-            triggerUnitAttackAnimation(creep, player.x, player.y);
+            triggerUnitAttackAnimation(creep, hero.x, hero.y);
         }
     }
 
@@ -699,11 +763,12 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
             creep.attackAnimationTimer = Math.max(0.0, creep.attackAnimationTimer - dt);
 
             double distToHome = distance(creep.x, creep.y, creep.homeX, creep.homeY);
-            double heroHomeDist = gameOver ? Double.MAX_VALUE : distance(player.x, player.y, creep.homeX, creep.homeY);
-            if (creep.aggroedToHero && (gameOver || player.hp <= 0 || heroHomeDist > creep.leashRadius + 8.0)) {
+            Player nearbyHero = gameOver ? null : findNearestHero(creep.homeX, creep.homeY, creep.aggroRadius);
+            Player leashedHero = gameOver ? null : findNearestHero(creep.homeX, creep.homeY, creep.leashRadius + 8.0);
+            if (creep.aggroedToHero && leashedHero == null) {
                 creep.aggroedToHero = false;
             }
-            if (!creep.aggroedToHero && heroHomeDist <= creep.aggroRadius) {
+            if (!creep.aggroedToHero && nearbyHero != null) {
                 creep.aggroedToHero = true;
             }
 
@@ -715,7 +780,16 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
             }
 
             if (creep.aggroedToHero && !gameOver) {
-                engageHeroTarget(creep, dt);
+                Player targetHero = findNearestHero(creep.x, creep.y, creep.aggroRadius * 1.5);
+                if (targetHero != null) {
+                    engageHeroTarget(creep, targetHero, dt);
+                    updateCreepAnimation(creep, dt);
+                    continue;
+                }
+                creep.aggroedToHero = false;
+            }
+
+            if (creep.aggroedToHero) {
                 updateCreepAnimation(creep, dt);
                 continue;
             }
@@ -759,11 +833,19 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
                 }
             }
 
-            boolean heroInRange = !gameOver
-                    && enemyTeam == heroTeam
-                    && distance(structure.x, structure.y, player.x, player.y) <= structure.attackRange;
+            List<Player> heroCandidates = new ArrayList<>();
+            if (!gameOver) {
+                for (Player hero : heroes) {
+                    if (hero.hp <= 0 || hero.team != enemyTeam) {
+                        continue;
+                    }
+                    if (distance(structure.x, structure.y, hero.x, hero.y) <= structure.attackRange) {
+                        heroCandidates.add(hero);
+                    }
+                }
+            }
 
-            int totalTargets = candidates.size() + (heroInRange ? 1 : 0);
+            int totalTargets = candidates.size() + heroCandidates.size();
             if (totalTargets == 0) {
                 continue;
             }
@@ -772,7 +854,7 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
             if (picked < candidates.size()) {
                 damageCreepByStructure(candidates.get(picked), structure.damage);
             } else {
-                damagePlayer(structure.damage);
+                damageHero(heroCandidates.get(picked - candidates.size()), structure.damage);
             }
 
             structure.attackTimer = structure.attackCooldown;
@@ -780,21 +862,46 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
     }
 
     private void resolveUnitCollisions() {
-        List<CombatUnit> units = new ArrayList<>();
-        if (!gameOver && player.hp > 0) {
-            units.add(player);
-        }
-        addLivingUnits(units, laneCreeps);
-        addLivingUnits(units, neutralCreeps);
-        unitCollisionResolver.resolve(units, this::tryMoveCombatUnit);
+        List<CombatEntity> collidables = new ArrayList<>();
+        addLivingHeroes(collidables);
+        addLivingUnits(collidables, laneCreeps);
+        addLivingUnits(collidables, neutralCreeps);
+        addLivingStructures(collidables);
+        unitCollisionResolver.resolve(collidables, this::tryMoveCollidableEntity);
     }
 
-    private void addLivingUnits(List<CombatUnit> units, List<Creep> creeps) {
+    private void addLivingHeroes(List<CombatEntity> collidables) {
+        if (gameOver) {
+            return;
+        }
+        for (Player hero : heroes) {
+            if (hero.hp > 0) {
+                collidables.add(hero);
+            }
+        }
+    }
+
+    private void addLivingUnits(List<CombatEntity> units, List<Creep> creeps) {
         for (Creep creep : creeps) {
             if (creep.hp > 0) {
                 units.add(creep);
             }
         }
+    }
+
+    private void addLivingStructures(List<CombatEntity> collidables) {
+        for (Structure structure : structures) {
+            if (structure.hp > 0) {
+                collidables.add(structure);
+            }
+        }
+    }
+
+    private boolean tryMoveCollidableEntity(CombatEntity entity, double targetX, double targetY) {
+        if (entity instanceof Structure) {
+            return false;
+        }
+        return tryMoveCombatUnit((CombatUnit) entity, targetX, targetY);
     }
 
     private void triggerUnitAttackAnimation(CombatUnit unit, double targetX, double targetY) {
@@ -816,11 +923,16 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
         }
     }
 
-    private boolean shouldLaneCreepAttackHero(Creep creep) {
-        return !gameOver
-                && creep.team != heroTeam
-                && distance(creep.x, creep.y, player.x, player.y) <= 140.0
-                && findNearestLaneCreepByTeam(player.x, player.y, 96.0, heroTeam) == null;
+    private Player findLaneHeroTarget(Creep creep) {
+        if (gameOver) {
+            return null;
+        }
+
+        Player hero = findNearestHeroByTeam(creep.x, creep.y, 140.0, creep.team.opposite());
+        if (hero == null) {
+            return null;
+        }
+        return findNearestLaneCreepByTeam(hero.x, hero.y, 96.0, hero.team) == null ? hero : null;
     }
 
     private void damageCreepByHero(Creep creep, int damage) {
@@ -845,12 +957,21 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
         damageEntity(structure, damage);
     }
 
-    private void damagePlayer(int damage) {
-        if (playerHitCooldown > 0.0) {
+    private void damageHero(Player hero, int damage) {
+        if (hero.hp <= 0 || hero.hitCooldown > 0.0) {
             return;
         }
-        playerHitCooldown = 0.35;
-        damageEntity(player, damage);
+        hero.hitCooldown = 0.35;
+        damageEntity(hero, damage);
+        if (hero.hp <= 0) {
+            hero.hp = 0;
+            hero.respawnTimer = HERO_RESPAWN_TIME;
+            hero.moving = false;
+            hero.attackTimer = 0.0;
+            hero.attackAnimationTimer = 0.0;
+            hero.state = AnimationState.DEAD;
+            hero.animPhase = 0.0;
+        }
     }
 
     private void damageEntity(CombatEntity entity, int damage) {
@@ -899,7 +1020,7 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
                 continue;
             }
 
-            if (gameOver) {
+            if (gameOver || player.hp <= 0) {
                 continue;
             }
 
@@ -981,7 +1102,7 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
                 .filter(s -> s.hp > 0)
                 .filter(s -> s.team == enemyTeam)
                 .filter(s -> s.type == StructureType.TOWER && s.lane == creep.lane)
-                .max(Comparator.comparingInt(s -> s.laneOrder))
+                .min(Comparator.comparingDouble(s -> distance(creep.x, creep.y, s.x, s.y)))
                 .orElse(null);
 
         if (laneTower != null) {
@@ -1032,6 +1153,48 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
         }
 
         return bestCreep;
+    }
+
+    private Player findNearestHeroByTeam(double x, double y, double radius, Team team) {
+        Player bestHero = null;
+        double best = Double.MAX_VALUE;
+
+        for (Player hero : heroes) {
+            if (hero.hp <= 0 || hero.team != team) {
+                continue;
+            }
+
+            double dist = distance(x, y, hero.x, hero.y);
+            if (dist < radius && dist < best) {
+                best = dist;
+                bestHero = hero;
+            }
+        }
+
+        return bestHero;
+    }
+
+    private Player findNearestHero(double x, double y, double radius) {
+        Player bestHero = null;
+        double best = Double.MAX_VALUE;
+
+        for (Player hero : heroes) {
+            if (hero.hp <= 0) {
+                continue;
+            }
+
+            double dist = distance(x, y, hero.x, hero.y);
+            if (dist < radius && dist < best) {
+                best = dist;
+                bestHero = hero;
+            }
+        }
+
+        return bestHero;
+    }
+
+    private boolean isHostileHero(Player hero) {
+        return hero != player && hero.hp > 0 && hero.team != player.team;
     }
 
     private boolean isHostileCreep(Creep creep) {
@@ -1161,7 +1324,7 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
         drawCreeps(g2);
         drawExperienceOrbs(g2);
         drawBullets(g2);
-        drawPlayer(g2);
+        drawHeroes(g2);
         drawHeroOverheadHud(g2);
         hudRenderer.draw(g2, buildHudModel());
     }
@@ -1200,10 +1363,10 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
 
             if (s.type == StructureType.TOWER) {
                 g2.setColor(body);
-                g2.fillRoundRect(sx - r, sy - r, r * 2, r * 2, 8, 8);
+                g2.fillOval(sx - r, sy - r, r * 2, r * 2);
                 g2.setColor(border);
                 g2.setStroke(new BasicStroke((float) (2.2f * ZOOM / 2.0)));
-                g2.drawRoundRect(sx - r, sy - r, r * 2, r * 2, 8, 8);
+                g2.drawOval(sx - r, sy - r, r * 2, r * 2);
             } else {
                 g2.setColor(body);
                 g2.fillOval(sx - r, sy - r, r * 2, r * 2);
@@ -1268,16 +1431,30 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
         }
     }
 
-    private void drawPlayer(Graphics2D g2) {
-        int px = worldToScreenX(player.x);
-        int py = worldToScreenY(player.y);
+    private void drawHeroes(Graphics2D g2) {
+        for (Player hero : heroes) {
+            if (hero.hp <= 0) {
+                continue;
+            }
 
-        BufferedImage sprite = customizePlayerSprite(sprites.getPlayerFrame(player.state, player.animPhase));
-        drawTintedSpriteWithFacing(g2, sprite, px, py, player.aimAngle, HERO_RENDER_SCALE, null);
-        drawPlayerHelmet(g2, px, py);
+            int px = worldToScreenX(hero.x);
+            int py = worldToScreenY(hero.y);
 
-        if (player.state != AnimationState.DEAD) {
-            drawHeldWeapon(g2, px, py);
+            if (hero == player) {
+                BufferedImage sprite = customizePlayerSprite(sprites.getPlayerFrame(hero.state, hero.animPhase));
+                drawTintedSpriteWithFacing(g2, sprite, px, py, hero.aimAngle, HERO_RENDER_SCALE, null);
+                drawPlayerHelmet(g2, px, py);
+
+                if (hero.state != AnimationState.DEAD) {
+                    drawHeldWeapon(g2, px, py);
+                }
+                continue;
+            }
+
+            BufferedImage sprite = hero.team == Team.LIGHT
+                    ? sprites.getPlayerFrame(hero.state, hero.animPhase)
+                    : sprites.getEnemyFrame(hero.state, hero.animPhase);
+            drawTintedSpriteWithFacing(g2, sprite, px, py, hero.aimAngle, HERO_RENDER_SCALE, null);
         }
     }
 
@@ -1644,6 +1821,7 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
                 getHeight(),
                 ZOOM,
                 player,
+                heroes,
                 currentWeapon,
                 heroAbilities,
                 lightThrone,

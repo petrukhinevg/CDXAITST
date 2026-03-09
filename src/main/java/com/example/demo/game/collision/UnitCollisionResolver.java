@@ -1,6 +1,6 @@
 package com.example.demo.game.collision;
 
-import com.example.demo.game.model.CombatUnit;
+import com.example.demo.game.model.CombatEntity;
 import org.dyn4j.collision.narrowphase.Gjk;
 import org.dyn4j.collision.narrowphase.Penetration;
 import org.dyn4j.geometry.Circle;
@@ -15,10 +15,10 @@ public final class UnitCollisionResolver {
 
     @FunctionalInterface
     public interface MovementAdapter {
-        boolean tryMove(CombatUnit unit, double targetX, double targetY);
+        boolean tryMove(CombatEntity entity, double targetX, double targetY);
     }
 
-    public void resolve(List<? extends CombatUnit> units, MovementAdapter movementAdapter) {
+    public void resolve(List<? extends CombatEntity> units, MovementAdapter movementAdapter) {
         for (int pass = 0; pass < 2; pass++) {
             for (int i = 0; i < units.size(); i++) {
                 for (int j = i + 1; j < units.size(); j++) {
@@ -28,7 +28,7 @@ public final class UnitCollisionResolver {
         }
     }
 
-    private void resolvePair(CombatUnit first, CombatUnit second, MovementAdapter movementAdapter) {
+    private void resolvePair(CombatEntity first, CombatEntity second, MovementAdapter movementAdapter) {
         Circle firstShape = Geometry.createCircle(first.getRadius());
         Circle secondShape = Geometry.createCircle(second.getRadius());
 

@@ -4,6 +4,8 @@ public class Player implements CombatUnit {
     public Team team = Team.LIGHT;
     public double x;
     public double y;
+    public double spawnX;
+    public double spawnY;
     public double radius = 12.0;
 
     public int hp;
@@ -17,6 +19,8 @@ public class Player implements CombatUnit {
     public boolean moving;
     public double animPhase;
     public double aimAngle;
+    public double hitCooldown;
+    public double respawnTimer;
     public double attackTimer;
     public double attackAnimationTimer;
     public AnimationState state = AnimationState.IDLE;

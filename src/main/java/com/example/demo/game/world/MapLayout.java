@@ -66,11 +66,11 @@ public final class MapLayout {
         if (team == Team.LIGHT) {
             map.put(LaneType.TOP, List.of(p(15, 119), p(17, 63)));
             map.put(LaneType.MID, List.of(p(35, 125), p(68, 92)));
-            map.put(LaneType.BOT, List.of(p(52, 145), p(105, 144)));
+            map.put(LaneType.BOT, List.of(p(41, 145), p(97, 143)));
         } else {
             map.put(LaneType.TOP, List.of(p(109, 15), p(55, 15)));
             map.put(LaneType.MID, List.of(p(125, 35), p(92, 68)));
-            map.put(LaneType.BOT, List.of(p(144, 109), p(144, 55)));
+            map.put(LaneType.BOT, List.of(p(145, 51), p(144, 105)));
         }
 
         return map;
