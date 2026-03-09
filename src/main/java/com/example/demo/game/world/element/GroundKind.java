@@ -1,12 +1,11 @@
-package com.example.demo.game.world;
+package com.example.demo.game.world.element;
 
-public enum GroundType {
+public enum GroundKind {
     FOREST,
     GRASS,
     GRASS_ALT,
     DIRT,
     LANE,
-    RIVER,
     HIGH_GROUND,
     BASE
 }

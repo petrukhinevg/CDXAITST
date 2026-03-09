@@ -1,6 +1,7 @@
 package com.example.demo.game.world;
 
 import com.example.demo.game.model.LaneType;
+import com.example.demo.game.world.element.MapElements;
 
 import java.awt.Point;
 import java.util.List;
@@ -22,6 +23,7 @@ public class MapGenerator {
         carveBaseArea(map, MapLayout.LIGHT_THRONE_TILE, scaledRadius(map, 9));
         carveBaseArea(map, MapLayout.DARK_THRONE_TILE, scaledRadius(map, 9));
 
+        paintRiver(map);
         paintHighGround(map);
         placeProps(map, random);
     }
@@ -29,9 +31,9 @@ public class MapGenerator {
     private void paintBaseGround(GameMap map, Random random) {
         for (int y = 0; y < map.getHeight(); y++) {
             for (int x = 0; x < map.getWidth(); x++) {
-                map.setGround(x, y, random.nextDouble() < 0.56 ? GroundType.GRASS : GroundType.GRASS_ALT);
+                map.setGround(x, y, random.nextDouble() < 0.56 ? MapElements.GRASS : MapElements.GRASS_ALT);
                 if (random.nextDouble() < 0.07) {
-                    map.setGround(x, y, GroundType.DIRT);
+                    map.setGround(x, y, MapElements.DIRT);
                 }
             }
         }
@@ -39,8 +41,8 @@ public class MapGenerator {
 
     private void carveLane(GameMap map, List<Point> path, int halfWidth) {
         for (int i = 1; i < path.size(); i++) {
-            carveSegment(map, path.get(i - 1), path.get(i), halfWidth, GroundType.LANE, true);
-            carveSegment(map, path.get(i - 1), path.get(i), halfWidth + 1, GroundType.DIRT, false);
+            carveSegment(map, path.get(i - 1), path.get(i), halfWidth, MapElements.LANE, true);
+            carveSegment(map, path.get(i - 1), path.get(i), halfWidth + 1, MapElements.DIRT, false);
         }
     }
 
@@ -53,39 +55,64 @@ public class MapGenerator {
                 if (distance(x, y, center.x, center.y) <= radius + 0.2) {
                     map.setBlocked(x, y, false);
                     map.setLane(x, y, false);
-                    map.setRiver(x, y, false);
+                    map.setWater(x, y, null);
                     map.setElevation(x, y, 1);
-                    map.setGround(x, y, GroundType.BASE);
-                    map.setProp(x, y, PropType.NONE);
+                    map.setGround(x, y, MapElements.BASE);
+                    map.setProp(x, y, null);
                 }
             }
         }
     }
 
     private void paintRiver(GameMap map) {
-        for (int x = 0; x < map.getWidth(); x++) {
-            int yCenter = x + (int) Math.round(Math.sin(x * 0.05) * scaled(map, 3.0));
-            int riverHalfWidth = scaledRadius(map, 3);
-            for (int y = yCenter - riverHalfWidth; y <= yCenter + riverHalfWidth; y++) {
+        int steps = Math.max(map.getWidth(), map.getHeight()) * 3;
+        int riverRadius = scaledRadius(map, 4);
+        double startX = -scaled(map, 10.0);
+        double startY = scaled(map, 30.0);
+        double c1X = scaled(map, 18.0);
+        double c1Y = scaled(map, 25.0);
+        double c2X = scaled(map, 31.0);
+        double c2Y = scaled(map, 57.0);
+        double endX = map.getWidth() - 1 + scaled(map, 12.0);
+        double endY = scaled(map, 58.0);
+
+        for (int i = 0; i <= steps; i++) {
+            double t = i / (double) steps;
+            double x = cubic(startX, c1X, c2X, endX, t);
+            double y = cubic(startY, c1Y, c2Y, endY, t);
+            fillRiverDisc(map, (int) Math.round(x), (int) Math.round(y), riverRadius);
+        }
+    }
+
+    private void fillRiverDisc(GameMap map, int cx, int cy, int radius) {
+        for (int y = cy - radius; y <= cy + radius; y++) {
+            for (int x = cx - radius; x <= cx + radius; x++) {
                 if (!map.inBounds(x, y)) {
                     continue;
                 }
-
-                map.setRiver(x, y, true);
-                map.setElevation(x, y, -1);
-
-                if (Math.abs(x - map.getWidth() / 2) <= scaledRadius(map, 7)
-                        && Math.abs(y - map.getHeight() / 2) <= scaledRadius(map, 7)
-                        && map.isLane(x, y)) {
-                    map.setGround(x, y, GroundType.DIRT);
-                } else {
-                    map.setGround(x, y, GroundType.RIVER);
+                if (distance(x, y, cx, cy) > radius + 0.35) {
+                    continue;
+                }
+                if (map.isLane(x, y) && !isMidRiverCrossing(map, x, y)) {
+                    continue;
                 }
 
+                map.setWater(x, y, MapElements.RIVER);
+                map.setElevation(x, y, -1);
+                if (!map.isLane(x, y)) {
+                    map.setGround(x, y, map.getGround(x, y));
+                }
                 map.setBlocked(x, y, false);
-                map.setProp(x, y, PropType.NONE);
+                map.setProp(x, y, null);
             }
         }
+    }
+
+    private boolean isMidRiverCrossing(GameMap map, int x, int y) {
+        int centerX = map.getWidth() / 2;
+        int centerY = map.getHeight() / 2;
+        int allowance = scaledRadius(map, 8);
+        return Math.abs(x - centerX) <= allowance && Math.abs(y - centerY) <= allowance;
     }
 
     private void paintHighGround(GameMap map) {
@@ -104,8 +131,8 @@ public class MapGenerator {
                     continue;
                 }
                 map.setElevation(x, y, 1);
-                if (map.getGround(x, y) != GroundType.BASE) {
-                    map.setGround(x, y, GroundType.HIGH_GROUND);
+                if (map.getGround(x, y) != MapElements.BASE) {
+                    map.setGround(x, y, MapElements.HIGH_GROUND);
                 }
             }
         }
@@ -128,7 +155,7 @@ public class MapGenerator {
 
     private void carveTrail(GameMap map, List<Point> points, int halfWidth) {
         for (int i = 1; i < points.size(); i++) {
-            carveSegment(map, points.get(i - 1), points.get(i), halfWidth, GroundType.DIRT, false);
+            carveSegment(map, points.get(i - 1), points.get(i), halfWidth, MapElements.DIRT, false);
         }
     }
 
@@ -140,8 +167,8 @@ public class MapGenerator {
                 }
                 if (distance(x, y, center.x, center.y) <= radius + 0.2) {
                     map.setBlocked(x, y, false);
-                    map.setGround(x, y, GroundType.GRASS_ALT);
-                    map.setProp(x, y, PropType.NONE);
+                    map.setGround(x, y, MapElements.GRASS_ALT);
+                    map.setProp(x, y, null);
                 }
             }
         }
@@ -151,7 +178,7 @@ public class MapGenerator {
                               Point from,
                               Point to,
                               int radius,
-                              GroundType ground,
+                              com.example.demo.game.world.element.GroundElement ground,
                               boolean markLane) {
         int x = from.x;
         int y = from.y;
@@ -169,7 +196,7 @@ public class MapGenerator {
         fillDisc(map, to.x, to.y, radius, ground, markLane);
     }
 
-    private void fillDisc(GameMap map, int cx, int cy, int radius, GroundType ground, boolean markLane) {
+    private void fillDisc(GameMap map, int cx, int cy, int radius, com.example.demo.game.world.element.GroundElement ground, boolean markLane) {
         for (int y = cy - radius; y <= cy + radius; y++) {
             for (int x = cx - radius; x <= cx + radius; x++) {
                 if (!map.inBounds(x, y)) {
@@ -187,7 +214,7 @@ public class MapGenerator {
                     map.setLane(x, y, true);
                     map.setElevation(x, y, 0);
                 }
-                map.setProp(x, y, PropType.NONE);
+                map.setProp(x, y, null);
             }
         }
     }
@@ -202,8 +229,8 @@ public class MapGenerator {
                 double chance = map.getElevation(x, y) > 0 ? 0.58 : 0.48;
                 if (random.nextDouble() < chance) {
                     map.setBlocked(x, y, true);
-                    map.setGround(x, y, GroundType.FOREST);
-                    map.setProp(x, y, PropType.NONE);
+                    map.setGround(x, y, MapElements.FOREST);
+                    map.setProp(x, y, null);
                 }
             }
         }
@@ -216,26 +243,26 @@ public class MapGenerator {
     private void placeProps(GameMap map, Random random) {
         for (int y = 1; y < map.getHeight() - 1; y++) {
             for (int x = 1; x < map.getWidth() - 1; x++) {
-                if (map.isBlocked(x, y) || map.isLane(x, y) || map.isRiver(x, y) || map.getGround(x, y) == GroundType.BASE) {
+                if (map.isBlocked(x, y) || map.isLane(x, y) || map.isRiver(x, y) || map.getGround(x, y) == MapElements.BASE) {
                     continue;
                 }
 
                 double roll = random.nextDouble();
                 if (roll < 0.020) {
-                    map.setProp(x, y, PropType.ROCK);
+                    map.setProp(x, y, MapElements.ROCK);
                 } else if (roll < 0.032) {
-                    map.setProp(x, y, PropType.PEBBLES);
+                    map.setProp(x, y, MapElements.PEBBLES);
                 }
             }
         }
     }
 
     private boolean mustStayOpen(GameMap map, int x, int y) {
-        if (map.isLane(x, y) || map.isRiver(x, y) || map.getGround(x, y) == GroundType.BASE) {
+        if (map.isLane(x, y) || map.isRiver(x, y) || map.getGround(x, y) == MapElements.BASE) {
             return true;
         }
 
-        if (map.getGround(x, y) == GroundType.DIRT) {
+        if (map.getGround(x, y) == MapElements.DIRT) {
             return true;
         }
 
@@ -257,6 +284,14 @@ public class MapGenerator {
 
     private double distance(double x1, double y1, double x2, double y2) {
         return Math.hypot(x1 - x2, y1 - y2);
+    }
+
+    private double cubic(double p0, double p1, double p2, double p3, double t) {
+        double inv = 1.0 - t;
+        return inv * inv * inv * p0
+                + 3.0 * inv * inv * t * p1
+                + 3.0 * inv * t * t * p2
+                + t * t * t * p3;
     }
 
     private Point p(GameMap map, int x, int y) {

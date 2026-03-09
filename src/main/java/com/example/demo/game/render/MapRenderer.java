@@ -1,8 +1,8 @@
 package com.example.demo.game.render;
 
 import com.example.demo.game.world.GameMap;
-import com.example.demo.game.world.GroundType;
-import com.example.demo.game.world.PropType;
+import com.example.demo.game.world.element.GroundKind;
+import com.example.demo.game.world.element.PropElement;
 
 import java.awt.BasicStroke;
 import java.awt.Color;
@@ -24,6 +24,7 @@ public class MapRenderer {
                 int sx = x * map.getTileSize();
                 int sy = y * map.getTileSize();
                 drawGroundTile(g2, map, x, y, sx, sy);
+                drawWaterTile(g2, map, x, y, sx, sy);
             }
         }
 
@@ -36,7 +37,7 @@ public class MapRenderer {
 
                 if (map.isBlocked(x, y)) {
                     drawTree(g2, map.getTileSize(), x, y, sx, sy, map.getTreeVariant(x, y), map.getTreeTint(x, y));
-                } else if (map.getProp(x, y) != PropType.NONE) {
+                } else if (map.getProp(x, y) != null) {
                     drawProp(g2, sx, sy, map.getProp(x, y));
                 }
             }
@@ -49,7 +50,7 @@ public class MapRenderer {
     }
 
     private void drawGroundTile(Graphics2D g2, GameMap map, int tileX, int tileY, int sx, int sy) {
-        GroundType type = map.getGround(tileX, tileY);
+        GroundKind type = map.getGround(tileX, tileY).kind();
         int tile = map.getTileSize();
 
         Color base = switch (type) {
@@ -58,7 +59,6 @@ public class MapRenderer {
             case GRASS_ALT -> new Color(88, 131, 74);
             case DIRT -> new Color(125, 103, 74);
             case LANE -> new Color(145, 124, 90);
-            case RIVER -> new Color(74, 120, 160);
             case HIGH_GROUND -> new Color(126, 160, 102);
             case BASE -> new Color(126, 118, 108);
         };
@@ -73,22 +73,18 @@ public class MapRenderer {
             variation -= 3;
         }
 
-        if (type == GroundType.FOREST && ((noise >> 4) & 31) < 6) {
+        if (type == GroundKind.FOREST && ((noise >> 4) & 31) < 6) {
             variation -= 5;
         }
 
         g2.setColor(shift(base, variation * 2));
         g2.fillRect(sx, sy, tile, tile);
 
-        if (type == GroundType.LANE) {
+        if (type == GroundKind.LANE) {
             g2.setColor(new Color(175, 151, 112, 120));
             g2.drawLine(sx + 2, sy + 8, sx + tile - 3, sy + 8);
             g2.drawLine(sx + 2, sy + 16, sx + tile - 3, sy + 16);
-        } else if (type == GroundType.RIVER) {
-            g2.setColor(new Color(146, 202, 226, 110));
-            g2.drawLine(sx + 2, sy + 6, sx + tile - 3, sy + 6);
-            g2.drawLine(sx + 4, sy + 14, sx + tile - 5, sy + 14);
-        } else if (type == GroundType.GRASS || type == GroundType.GRASS_ALT || type == GroundType.HIGH_GROUND || type == GroundType.FOREST) {
+        } else if (type == GroundKind.GRASS || type == GroundKind.GRASS_ALT || type == GroundKind.HIGH_GROUND || type == GroundKind.FOREST) {
             g2.setColor(new Color(54, 95, 45, 70));
             int bladeCount = 2 + (noise & 1);
             for (int i = 0; i < bladeCount; i++) {
@@ -96,6 +92,27 @@ public class MapRenderer {
                 int by = sy + 6 + ((noise >> (i * 5)) & 11);
                 g2.drawLine(bx, by, bx, by + 3);
             }
+        }
+    }
+
+    private void drawWaterTile(Graphics2D g2, GameMap map, int tileX, int tileY, int sx, int sy) {
+        if (map.getWater(tileX, tileY) == null) {
+            return;
+        }
+
+        int tile = map.getTileSize();
+        g2.setColor(new Color(74, 120, 160, 210));
+        g2.fillRect(sx, sy, tile, tile);
+        g2.setColor(new Color(146, 202, 226, 110));
+        g2.drawLine(sx + 2, sy + 6, sx + tile - 3, sy + 6);
+        g2.drawLine(sx + 4, sy + 14, sx + tile - 5, sy + 14);
+
+        if (map.isLane(tileX, tileY)) {
+            g2.setColor(new Color(196, 186, 152, 70));
+            g2.drawLine(sx + 2, sy + 8, sx + tile - 3, sy + 8);
+            g2.drawLine(sx + 2, sy + 16, sx + tile - 3, sy + 16);
+            g2.setColor(new Color(48, 92, 128, 80));
+            g2.drawLine(sx + 1, sy + 12, sx + tile - 2, sy + 12);
         }
     }
 
@@ -181,8 +198,8 @@ public class MapRenderer {
         }
     }
 
-    private void drawProp(Graphics2D g2, int sx, int sy, PropType type) {
-        switch (type) {
+    private void drawProp(Graphics2D g2, int sx, int sy, PropElement type) {
+        switch (type.kind()) {
             case ROCK -> {
                 g2.setColor(new Color(85, 88, 91));
                 g2.fillOval(sx + 6, sy + 11, 12, 8);
@@ -209,8 +226,6 @@ public class MapRenderer {
                 g2.fillOval(sx + 8, sy + 13, 3, 3);
                 g2.fillOval(sx + 12, sy + 10, 2, 2);
                 g2.fillOval(sx + 15, sy + 14, 2, 2);
-            }
-            case NONE -> {
             }
         }
     }

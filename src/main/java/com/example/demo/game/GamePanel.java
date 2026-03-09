@@ -21,8 +21,8 @@ import com.example.demo.game.render.HudRenderer;
 import com.example.demo.game.render.MapRenderer;
 import com.example.demo.game.render.SpriteLibrary;
 import com.example.demo.game.world.GameMap;
-import com.example.demo.game.world.MapGenerator;
-import com.example.demo.game.world.MapLayout;
+import com.example.demo.game.world.blueprint.MapBlueprint;
+import com.example.demo.game.world.blueprint.MapBlueprintLoader;
 
 import javax.swing.JPanel;
 import javax.swing.Timer;
@@ -64,7 +64,7 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
 
     private final GameMap map = new GameMap();
     private final UnitCollisionResolver unitCollisionResolver = new UnitCollisionResolver();
-    private final MapGenerator mapGenerator = new MapGenerator();
+    private final MapBlueprintLoader mapBlueprintLoader = new MapBlueprintLoader();
     private final HudRenderer hudRenderer = new HudRenderer();
     private final MapRenderer mapRenderer = new MapRenderer();
     private final SpriteLibrary sprites = SpriteLibrary.loadDefault();
@@ -83,6 +83,7 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
 
     private Structure lightThrone;
     private Structure darkThrone;
+    private MapBlueprint mapBlueprint;
 
     private BufferedImage mapLayer;
     private BufferedImage miniMapLayer;
@@ -147,8 +148,9 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
         initStructures();
         initNeutralCreeps();
 
-        player.x = map.tileCenter(GameConfig.PLAYER_START_TILE_X);
-        player.y = map.tileCenter(GameConfig.PLAYER_START_TILE_Y);
+        Point playerStart = mapBlueprint.playerStart();
+        player.x = map.tileCenter(playerStart.x);
+        player.y = map.tileCenter(playerStart.y);
         player.radius = 14.5;
         player.team = heroTeam;
         player.maxHp = 120;
@@ -187,7 +189,8 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
     }
 
     private void regenerateMap() {
-        mapGenerator.generate(map, random);
+        mapBlueprint = mapBlueprintLoader.load("/maps/default.map");
+        mapBlueprint.applyTo(map, random);
         rebuildMapLayers();
     }
 
@@ -202,28 +205,25 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
         for (Team team : List.of(Team.LIGHT, Team.DARK)) {
             EnumMap<LaneType, List<Point>> teamPaths = new EnumMap<>(LaneType.class);
             for (LaneType lane : LaneType.values()) {
-                teamPaths.put(lane, MapLayout.laneTilesForTeam(lane, team));
+                teamPaths.put(lane, mapBlueprint.laneTilesForTeam(lane, team));
             }
             lanePaths.put(team, teamPaths);
         }
     }
 
     private void initStructures() {
-        lightThrone = createThrone(Team.LIGHT, MapLayout.LIGHT_THRONE_TILE);
-        darkThrone = createThrone(Team.DARK, MapLayout.DARK_THRONE_TILE);
+        lightThrone = createThrone(Team.LIGHT, mapBlueprint.throneTile(Team.LIGHT));
+        darkThrone = createThrone(Team.DARK, mapBlueprint.throneTile(Team.DARK));
         structures.add(lightThrone);
         structures.add(darkThrone);
 
-        Map<LaneType, List<Point>> lightTowers = MapLayout.towerTilesForTeam(Team.LIGHT);
-        Map<LaneType, List<Point>> darkTowers = MapLayout.towerTilesForTeam(Team.DARK);
-
         for (LaneType lane : LaneType.values()) {
-            List<Point> lt = lightTowers.get(lane);
+            List<Point> lt = mapBlueprint.towerTiles(Team.LIGHT, lane);
             for (int i = 0; i < lt.size(); i++) {
                 structures.add(createTower(Team.LIGHT, lane, i, lt.get(i)));
             }
 
-            List<Point> dt = darkTowers.get(lane);
+            List<Point> dt = mapBlueprint.towerTiles(Team.DARK, lane);
             for (int i = 0; i < dt.size(); i++) {
                 structures.add(createTower(Team.DARK, lane, i, dt.get(i)));
             }

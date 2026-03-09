@@ -1,6 +1,10 @@
 package com.example.demo.game.world;
 
 import com.example.demo.game.config.GameConfig;
+import com.example.demo.game.world.element.GroundElement;
+import com.example.demo.game.world.element.MapElements;
+import com.example.demo.game.world.element.PropElement;
+import com.example.demo.game.world.element.WaterElement;
 
 import java.util.Random;
 
@@ -11,13 +15,13 @@ public class GameMap {
 
     private final boolean[][] blocked;
     private final boolean[][] lane;
-    private final boolean[][] river;
     private final int[][] elevation;
 
-    private final GroundType[][] ground;
+    private final GroundElement[][] ground;
+    private final WaterElement[][] water;
     private final int[][] treeVariant;
     private final int[][] treeTint;
-    private final PropType[][] props;
+    private final PropElement[][] props;
 
     public GameMap() {
         this(GameConfig.MAP_W, GameConfig.MAP_H, GameConfig.TILE);
@@ -30,13 +34,13 @@ public class GameMap {
 
         blocked = new boolean[height][width];
         lane = new boolean[height][width];
-        river = new boolean[height][width];
         elevation = new int[height][width];
 
-        ground = new GroundType[height][width];
+        ground = new GroundElement[height][width];
+        water = new WaterElement[height][width];
         treeVariant = new int[height][width];
         treeTint = new int[height][width];
-        props = new PropType[height][width];
+        props = new PropElement[height][width];
     }
 
     public void reset(Random random) {
@@ -44,12 +48,12 @@ public class GameMap {
             for (int x = 0; x < width; x++) {
                 blocked[y][x] = false;
                 lane[y][x] = false;
-                river[y][x] = false;
                 elevation[y][x] = 0;
-                ground[y][x] = GroundType.GRASS;
+                ground[y][x] = MapElements.GRASS;
+                water[y][x] = null;
                 treeVariant[y][x] = random.nextInt(4);
                 treeTint[y][x] = random.nextInt(5) - 2;
-                props[y][x] = PropType.NONE;
+                props[y][x] = null;
             }
         }
     }
@@ -75,11 +79,11 @@ public class GameMap {
     }
 
     public boolean isRiver(int x, int y) {
-        return river[y][x];
+        return water[y][x] != null;
     }
 
     public void setRiver(int x, int y, boolean value) {
-        river[y][x] = value;
+        water[y][x] = value ? MapElements.RIVER : null;
     }
 
     public int getElevation(int x, int y) {
@@ -90,12 +94,20 @@ public class GameMap {
         elevation[y][x] = value;
     }
 
-    public GroundType getGround(int x, int y) {
+    public GroundElement getGround(int x, int y) {
         return ground[y][x];
     }
 
-    public void setGround(int x, int y, GroundType type) {
+    public void setGround(int x, int y, GroundElement type) {
         ground[y][x] = type;
+    }
+
+    public WaterElement getWater(int x, int y) {
+        return water[y][x];
+    }
+
+    public void setWater(int x, int y, WaterElement element) {
+        water[y][x] = element;
     }
 
     public int getTreeVariant(int x, int y) {
@@ -114,11 +126,11 @@ public class GameMap {
         treeTint[y][x] = tint;
     }
 
-    public PropType getProp(int x, int y) {
+    public PropElement getProp(int x, int y) {
         return props[y][x];
     }
 
-    public void setProp(int x, int y, PropType type) {
+    public void setProp(int x, int y, PropElement type) {
         props[y][x] = type;
     }
 
