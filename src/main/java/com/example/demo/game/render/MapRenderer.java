@@ -52,6 +52,12 @@ public class MapRenderer {
     private void drawGroundTile(Graphics2D g2, GameMap map, int tileX, int tileY, int sx, int sy) {
         GroundKind type = map.getGround(tileX, tileY).kind();
         int tile = map.getTileSize();
+        int noise = tileNoise(tileX, tileY);
+
+        if (map.isLane(tileX, tileY)) {
+            drawLaneTile(g2, sx, sy, tile, noise);
+            return;
+        }
 
         Color base = switch (type) {
             case FOREST -> new Color(86, 128, 76);
@@ -65,8 +71,6 @@ public class MapRenderer {
         if (map.isBlocked(tileX, tileY) && (type == GroundKind.GRASS || type == GroundKind.GRASS_ALT)) {
             base = type == GroundKind.GRASS ? new Color(74, 109, 63) : new Color(63, 96, 54);
         }
-
-        int noise = tileNoise(tileX, tileY);
         int variation = (noise & 7) - 3;
 
         int elevation = map.getElevation(tileX, tileY);
@@ -86,9 +90,7 @@ public class MapRenderer {
         g2.setColor(shift(base, variation * 2));
         g2.fillRect(sx, sy, tile, tile);
 
-        if (map.isLane(tileX, tileY)) {
-            drawLaneMarkings(g2, sx, sy, tile, noise, false);
-        } else if (type == GroundKind.GRASS || type == GroundKind.GRASS_ALT || type == GroundKind.HIGH_GROUND || type == GroundKind.FOREST) {
+        if (type == GroundKind.GRASS || type == GroundKind.GRASS_ALT || type == GroundKind.HIGH_GROUND || type == GroundKind.FOREST) {
             g2.setColor(new Color(54, 95, 45, 70));
             int bladeCount = 2 + (noise & 1);
             for (int i = 0; i < bladeCount; i++) {
@@ -100,7 +102,7 @@ public class MapRenderer {
     }
 
     private void drawWaterTile(Graphics2D g2, GameMap map, int tileX, int tileY, int sx, int sy) {
-        if (map.getWater(tileX, tileY) == null) {
+        if (map.getWater(tileX, tileY) == null || map.isLane(tileX, tileY)) {
             return;
         }
 
@@ -110,33 +112,43 @@ public class MapRenderer {
         g2.setColor(new Color(146, 202, 226, 110));
         g2.drawLine(sx + 2, sy + 6, sx + tile - 3, sy + 6);
         g2.drawLine(sx + 4, sy + 14, sx + tile - 5, sy + 14);
-
-        if (map.isLane(tileX, tileY)) {
-            drawLaneMarkings(g2, sx, sy, tile, tileNoise(tileX, tileY), true);
-        }
     }
 
-    private void drawLaneMarkings(Graphics2D g2, int sx, int sy, int tile, int noise, boolean overWater) {
-        int baseShift = ((noise >> 3) & 3) - 1;
-        int accentShift = ((noise >> 5) & 3) - 1;
+    private void drawLaneTile(Graphics2D g2, int sx, int sy, int tile, int noise) {
+        int sandShift = (noise & 7) - 3;
+        int mossShift = ((noise >> 3) & 7) - 3;
+        int warmShift = ((noise >> 6) & 7) - 3;
 
-        Color laneBase = shift(new Color(82, 75, 68), baseShift * 4);
-        Color laneAccent = shift(new Color(118, 108, 96), accentShift * 4);
-        Color laneCenter = shift(new Color(62, 56, 50), baseShift * 3);
+        Color sandBase = shift(new Color(198, 181, 132), sandShift * 3);
+        Color sandWarm = shift(new Color(180, 162, 114), warmShift * 3);
+        Color mossBase = shift(new Color(143, 154, 104), mossShift * 3);
+        Color mossLight = shift(new Color(166, 174, 120), (mossShift + warmShift) * 2);
+        Color edgeShade = shift(new Color(132, 118, 84), sandShift * 2);
 
-        int baseAlpha = overWater ? 155 : 120;
-        int accentAlpha = overWater ? 220 : 210;
-        int centerAlpha = overWater ? 170 : 155;
+        g2.setColor(sandBase);
+        g2.fillRect(sx, sy, tile, tile);
 
-        g2.setColor(withAlpha(laneBase, baseAlpha));
-        g2.fillRect(sx + 1, sy + 5, tile - 2, tile - 10);
+        int warmX = sx + 2 + ((noise >> 9) & 3);
+        int warmY = sy + 1 + ((noise >> 11) & 4);
+        g2.setColor(withAlpha(sandWarm, 175));
+        g2.fillOval(warmX, warmY, tile - 4, tile - 7);
 
-        g2.setColor(withAlpha(laneAccent, accentAlpha));
-        g2.drawLine(sx + 2, sy + 8, sx + tile - 3, sy + 8);
-        g2.drawLine(sx + 2, sy + 16, sx + tile - 3, sy + 16);
+        int mossX = sx + ((noise >> 13) & 4) - 1;
+        int mossY = sy + 3 + ((noise >> 15) & 3);
+        g2.setColor(withAlpha(mossBase, 145));
+        g2.fillOval(mossX, mossY, tile - 6, tile - 8);
 
-        g2.setColor(withAlpha(laneCenter, centerAlpha));
-        g2.drawLine(sx + 1, sy + 12, sx + tile - 2, sy + 12);
+        g2.setColor(withAlpha(mossLight, 105));
+        g2.fillOval(sx + tile / 3 - 2, sy + 2 + ((noise >> 17) & 3), tile / 2 + 2, tile / 3 + 3);
+        g2.fillOval(sx + 3, sy + tile / 2 - 2, tile / 2 + 1, tile / 3 + 2);
+
+        g2.setColor(withAlpha(edgeShade, 90));
+        g2.drawLine(sx, sy + tile - 1, sx + tile - 1, sy + tile - 1);
+        g2.drawLine(sx + tile - 1, sy, sx + tile - 1, sy + tile - 1);
+
+        g2.setColor(withAlpha(new Color(226, 214, 175), 90));
+        g2.drawLine(sx + 1, sy + 1, sx + tile - 3, sy + 1);
+        g2.drawLine(sx + 1, sy + 2, sx + 1, sy + tile - 3);
     }
 
     private void drawElevationEdges(Graphics2D g2, GameMap map) {
