@@ -65,11 +65,8 @@ public class MapGenerator {
     }
 
     private void paintRiver(GameMap map) {
-        int baseY = map.getHeight() / 2;
-        int centerX = map.getWidth() / 2;
-
         for (int x = 0; x < map.getWidth(); x++) {
-            int yCenter = baseY + (int) Math.round(Math.sin(x * 0.07) * 2.0);
+            int yCenter = x + (int) Math.round(Math.sin(x * 0.05) * 3.0);
             for (int y = yCenter - 4; y <= yCenter + 4; y++) {
                 if (!map.inBounds(x, y)) {
                     continue;
@@ -78,7 +75,7 @@ public class MapGenerator {
                 map.setRiver(x, y, true);
                 map.setElevation(x, y, -1);
 
-                if (Math.abs(x - centerX) <= 7 && map.isLane(x, y)) {
+                if (Math.abs(x - map.getWidth() / 2) <= 10 && Math.abs(y - map.getHeight() / 2) <= 10 && map.isLane(x, y)) {
                     map.setGround(x, y, GroundType.DIRT);
                 } else {
                     map.setGround(x, y, GroundType.RIVER);
@@ -91,10 +88,12 @@ public class MapGenerator {
     }
 
     private void paintHighGround(GameMap map) {
-        raiseRegion(map, 34, 22, 92, 66);
-        raiseRegion(map, 126, 72, 186, 118);
-        raiseRegion(map, 50, 88, 92, 124);
-        raiseRegion(map, 122, 18, 164, 54);
+        raiseRegion(map, 28, 28, 96, 96);
+        raiseRegion(map, 124, 124, 192, 192);
+        raiseRegion(map, 28, 124, 96, 192);
+        raiseRegion(map, 124, 28, 192, 96);
+        raiseRegion(map, 46, 164, 92, 208);
+        raiseRegion(map, 128, 12, 174, 56);
     }
 
     private void raiseRegion(GameMap map, int x1, int y1, int x2, int y2) {
@@ -112,11 +111,13 @@ public class MapGenerator {
     }
 
     private void carveJungleRoadsAndCamps(GameMap map) {
-        carveTrail(map, List.of(new Point(30, 110), new Point(58, 92), new Point(86, 74), new Point(110, 70)), 2);
-        carveTrail(map, List.of(new Point(40, 124), new Point(64, 116), new Point(84, 102)), 2);
+        carveTrail(map, List.of(new Point(32, 178), new Point(52, 154), new Point(74, 132), new Point(98, 110)), 2);
+        carveTrail(map, List.of(new Point(58, 198), new Point(80, 174), new Point(102, 150), new Point(124, 126)), 2);
+        carveTrail(map, List.of(new Point(24, 136), new Point(46, 120), new Point(72, 104), new Point(96, 92)), 2);
 
-        carveTrail(map, List.of(new Point(188, 30), new Point(162, 48), new Point(136, 66), new Point(110, 70)), 2);
-        carveTrail(map, List.of(new Point(180, 54), new Point(156, 70), new Point(136, 86)), 2);
+        carveTrail(map, List.of(new Point(188, 42), new Point(166, 66), new Point(146, 88), new Point(124, 110)), 2);
+        carveTrail(map, List.of(new Point(164, 22), new Point(140, 46), new Point(118, 70), new Point(96, 94)), 2);
+        carveTrail(map, List.of(new Point(198, 84), new Point(176, 100), new Point(150, 116), new Point(124, 128)), 2);
 
         for (Point camp : MapLayout.neutralCampTiles()) {
             carveCamp(map, camp, 5);
@@ -234,7 +235,7 @@ public class MapGenerator {
             return true;
         }
 
-        if (map.getGround(x, y) == GroundType.DIRT || map.getGround(x, y) == GroundType.GRASS_ALT) {
+        if (map.getGround(x, y) == GroundType.DIRT) {
             return true;
         }
 

@@ -1,7 +1,6 @@
 package com.example.demo.game;
 
 import com.example.demo.game.config.GameConfig;
-import com.example.demo.game.editor.MapEditor;
 import com.example.demo.game.model.AnimationState;
 import com.example.demo.game.model.Bullet;
 import com.example.demo.game.model.CombatEntity;
@@ -53,7 +52,6 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
     private final Random random = new Random();
 
     private final GameMap map = new GameMap();
-    private final MapEditor mapEditor = new MapEditor();
     private final MapGenerator mapGenerator = new MapGenerator();
     private final HudRenderer hudRenderer = new HudRenderer();
     private final MapRenderer mapRenderer = new MapRenderer();
@@ -85,8 +83,6 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
     private boolean left;
     private boolean right;
     private boolean attackMouseDown;
-    private boolean paintBlockedMouseDown;
-    private boolean paintClearedMouseDown;
     private int mouseX;
     private int mouseY;
 
@@ -168,8 +164,6 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
         gameOver = false;
         victoryText = "";
         attackMouseDown = false;
-        paintBlockedMouseDown = false;
-        paintClearedMouseDown = false;
 
         spawnLaneWave();
 
@@ -183,7 +177,6 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
 
     private void regenerateMap() {
         mapGenerator.generate(map, random);
-        mapEditor.applyStoredOverrides(map);
         rebuildMapLayers();
     }
 
@@ -384,7 +377,7 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
         boolean moved = false;
         if (!gameOver) {
             moved = movePlayer(dt);
-            if (!mapEditor.isEditMode() && attackMouseDown && attackCooldown <= 0.0) {
+            if (attackMouseDown && attackCooldown <= 0.0) {
                 attackWithCurrentWeapon();
             }
         }
@@ -1148,7 +1141,6 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
         Graphics2D g2 = (Graphics2D) g;
 
         drawMap(g2);
-        mapEditor.drawOverlay(g2, map, getWidth(), getHeight(), cameraX, cameraY, ZOOM, mouseX, mouseY);
 
         g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
         drawStructures(g2);
@@ -1397,9 +1389,6 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
                 kills,
                 currentFps,
                 targetFps,
-                mapEditor.isEditMode(),
-                mapEditor.overrideCount(),
-                mapEditor.hoveredTile(map, mouseX, mouseY, cameraX, cameraY, ZOOM),
                 miniMapLayer,
                 map,
                 cameraX,
@@ -1426,19 +1415,6 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
             case KeyEvent.VK_1 -> switchWeapon(WeaponType.STONE);
             case KeyEvent.VK_2 -> switchWeapon(WeaponType.BOW);
             case KeyEvent.VK_3 -> switchWeapon(WeaponType.SWORD);
-            case KeyEvent.VK_E -> {
-                mapEditor.toggleEditMode();
-                attackMouseDown = false;
-                paintBlockedMouseDown = false;
-                paintClearedMouseDown = false;
-            }
-            case KeyEvent.VK_N -> resetGame();
-            case KeyEvent.VK_C -> {
-                if (mapEditor.isEditMode() && mapEditor.hasOverrides()) {
-                    mapEditor.clearOverrides();
-                    regenerateMap();
-                }
-            }
             case KeyEvent.VK_R -> {
                 if (gameOver) {
                     resetGame();
@@ -1466,17 +1442,6 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
     @Override
     public void mouseDragged(MouseEvent e) {
         mouseMoved(e);
-        if (mapEditor.isEditMode()) {
-            if (paintBlockedMouseDown) {
-                if (mapEditor.paintAtScreenPoint(map, mouseX, mouseY, cameraX, cameraY, ZOOM, MapEditor.TilePaintAction.BLOCKED)) {
-                    rebuildMapLayers();
-                }
-            } else if (paintClearedMouseDown) {
-                if (mapEditor.paintAtScreenPoint(map, mouseX, mouseY, cameraX, cameraY, ZOOM, MapEditor.TilePaintAction.CLEARED)) {
-                    rebuildMapLayers();
-                }
-            }
-        }
     }
 
     @Override
@@ -1493,21 +1458,6 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
     public void mousePressed(MouseEvent e) {
         mouseMoved(e);
 
-        if (mapEditor.isEditMode()) {
-            if (e.getButton() == MouseEvent.BUTTON1) {
-                paintBlockedMouseDown = true;
-                if (mapEditor.paintAtScreenPoint(map, mouseX, mouseY, cameraX, cameraY, ZOOM, MapEditor.TilePaintAction.BLOCKED)) {
-                    rebuildMapLayers();
-                }
-            } else if (e.getButton() == MouseEvent.BUTTON3) {
-                paintClearedMouseDown = true;
-                if (mapEditor.paintAtScreenPoint(map, mouseX, mouseY, cameraX, cameraY, ZOOM, MapEditor.TilePaintAction.CLEARED)) {
-                    rebuildMapLayers();
-                }
-            }
-            return;
-        }
-
         if (e.getButton() == MouseEvent.BUTTON1) {
             attackMouseDown = true;
         }
@@ -1516,13 +1466,7 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
     @Override
     public void mouseReleased(MouseEvent e) {
         if (e.getButton() == MouseEvent.BUTTON1) {
-            if (mapEditor.isEditMode()) {
-                paintBlockedMouseDown = false;
-            } else {
-                attackMouseDown = false;
-            }
-        } else if (e.getButton() == MouseEvent.BUTTON3) {
-            paintClearedMouseDown = false;
+            attackMouseDown = false;
         }
     }
 

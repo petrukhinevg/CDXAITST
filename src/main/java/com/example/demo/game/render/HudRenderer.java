@@ -1,6 +1,5 @@
 package com.example.demo.game.render;
 
-import com.example.demo.game.editor.MapEditor;
 import com.example.demo.game.model.Creep;
 import com.example.demo.game.model.Player;
 import com.example.demo.game.model.Structure;
@@ -35,9 +34,6 @@ public final class HudRenderer {
                         int kills,
                         int currentFps,
                         int targetFps,
-                        boolean editMode,
-                        int manualTileCount,
-                        MapEditor.HoveredTile hoveredTile,
                         BufferedImage miniMapLayer,
                         GameMap map,
                         double cameraX,
@@ -120,15 +116,8 @@ public final class HudRenderer {
 
         g2.drawString("1 Камень  2 Лук  3 Меч", rightX, 210);
         g2.drawString("WASD - движение, ЛКМ - атака", rightX, 228);
-        g2.drawString("E - режим правки, N - новая база", rightX, 246);
-        g2.drawString("В правке: ЛКМ ставит блок, ПКМ очищает", rightX, 264);
-        g2.drawString("C - сбросить ручные правки", rightX, 282);
-        g2.drawString("Ручных тайлов: " + model.manualTileCount(), rightX, 300);
-
-        g2.setColor(model.editMode() ? new Color(255, 228, 157) : new Color(188, 188, 188));
-        g2.drawString("Редактор карты: " + (model.editMode() ? "включен" : "выключен"), 30, 246);
-        g2.drawString(hoverText(model.hoveredTile()), 30, 264);
-        g2.setColor(Color.WHITE);
+        g2.drawString("Линии: top / mid / bot", rightX, 246);
+        g2.drawString("Река делит квадратную карту по диагонали", rightX, 264);
 
         drawMiniMap(g2, model);
 
@@ -206,13 +195,6 @@ public final class HudRenderer {
         g2.setColor(new Color(255, 255, 255, 160));
         g2.setStroke(new BasicStroke(1.2f));
         g2.drawRect(camX, camY, camW, camH);
-    }
-
-    private String hoverText(MapEditor.HoveredTile hoveredTile) {
-        if (hoveredTile == null || !hoveredTile.inBounds()) {
-            return "Тайл: вне карты";
-        }
-        return "Тайл: " + hoveredTile.x() + ", " + hoveredTile.y() + (hoveredTile.editable() ? "" : " (защищён)");
     }
 
     private void drawBar(Graphics2D g2,
