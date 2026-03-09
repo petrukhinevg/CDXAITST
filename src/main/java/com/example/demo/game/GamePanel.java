@@ -545,6 +545,7 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
         creep.laneRepathCooldown = 0.0;
         creep.deathAnimationTimer = 0.0;
         creep.deathRewardsGranted = false;
+        creep.deniedByHero = false;
         laneCreeps.add(creep);
     }
 
@@ -715,7 +716,7 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
     }
 
     private boolean updatePlayerAttackOrder(double dt) {
-        if (playerAttackTarget == null || !playerAttackTarget.isAlive()) {
+        if (!isValidPlayerAttackTarget(playerAttackTarget)) {
             clearPlayerOrders();
             return false;
         }
@@ -807,7 +808,7 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
 
     private void issueAttackOrder(CombatEntity target) {
         clearPlayerOrders();
-        if (gameOver || player.hp <= 0 || target == null || !target.isAlive()) {
+        if (gameOver || player.hp <= 0 || !isValidPlayerAttackTarget(target)) {
             return;
         }
 
@@ -825,7 +826,7 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
     }
 
     private void rebuildPlayerAttackPath(CombatEntity target) {
-        if (target == null || !target.isAlive()) {
+        if (!isValidPlayerAttackTarget(target)) {
             clearPlayerOrders();
             return;
         }
@@ -1135,14 +1136,14 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
         }
 
         for (Creep creep : laneCreeps) {
-            if (isHostileCreep(creep) && inMeleeArc(creep.x, creep.y, meleeRange + creep.radius, arcHalf)) {
+            if (isAttackablePlayerCreepTarget(creep) && inMeleeArc(creep.x, creep.y, meleeRange + creep.radius, arcHalf)) {
                 damageCreepByHero(creep, weapon.damage());
                 hitSomething = true;
             }
         }
 
         for (Creep creep : neutralCreeps) {
-            if (isHostileCreep(creep) && inMeleeArc(creep.x, creep.y, meleeRange + creep.radius, arcHalf)) {
+            if (isAttackablePlayerCreepTarget(creep) && inMeleeArc(creep.x, creep.y, meleeRange + creep.radius, arcHalf)) {
                 damageCreepByHero(creep, weapon.damage());
                 hitSomething = true;
             }
@@ -1216,7 +1217,7 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
             }
 
             for (Creep creep : laneCreeps) {
-                if (!isHostileCreep(creep) || creep.hp <= 0) {
+                if (!isAttackablePlayerCreepTarget(creep) || creep.hp <= 0) {
                     continue;
                 }
                 if (distance(bullet.x, bullet.y, creep.x, creep.y) <= bullet.radius + creep.radius) {
@@ -1229,7 +1230,7 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
 
             if (!hit) {
                 for (Creep creep : neutralCreeps) {
-                    if (!isHostileCreep(creep) || creep.hp <= 0) {
+                    if (!isAttackablePlayerCreepTarget(creep) || creep.hp <= 0) {
                         continue;
                     }
                     if (distance(bullet.x, bullet.y, creep.x, creep.y) <= bullet.radius + creep.radius) {
@@ -1311,9 +1312,7 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
     }
 
     private boolean isValidPlayerProjectileTarget(CombatEntity target) {
-        return target != null
-                && target.isAlive()
-                && target.getTeam() != player.team;
+        return isValidPlayerAttackTarget(target);
     }
 
     private void applyPlayerProjectileHit(CombatEntity target, int damage) {
@@ -2118,12 +2117,17 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
         if (creep.hp <= 0) {
             return;
         }
+        boolean denyKill = isFriendlyDenyableCreep(creep);
         creep.lastHitByHero = true;
         creep.lastHitByCreep = false;
+        creep.deniedByHero = false;
         damageEntity(creep, damage);
         if (creep.hp <= 0) {
+            creep.deniedByHero = denyKill;
             beginCreepDeath(creep);
-            audio.onEnemyDown();
+            if (!denyKill) {
+                audio.onEnemyDown();
+            }
         }
     }
 
@@ -2133,6 +2137,7 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
         }
         creep.lastHitByHero = false;
         creep.lastHitByCreep = true;
+        creep.deniedByHero = false;
         damageEntity(creep, damage);
         if (creep.hp <= 0) {
             beginCreepDeath(creep);
@@ -2145,6 +2150,7 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
         }
         creep.lastHitByHero = false;
         creep.lastHitByCreep = false;
+        creep.deniedByHero = false;
         damageEntity(creep, damage);
         if (creep.hp <= 0) {
             beginCreepDeath(creep);
@@ -2219,6 +2225,9 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
     }
 
     private void handleCreepDeathRewards(Creep creep, int totalXp) {
+        if (creep.deniedByHero || !shouldPlayerReceiveCreepXp(creep)) {
+            return;
+        }
         if (creep.lastHitByHero) {
             spawnExperienceOrbs(creep.x, creep.y, totalXp, true);
             return;
@@ -2452,7 +2461,7 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
         double bestDistance = Double.MAX_VALUE;
 
         for (Creep creep : laneCreeps) {
-            if (!isHostileCreep(creep)) {
+            if (!isAttackablePlayerCreepTarget(creep)) {
                 continue;
             }
 
@@ -2464,7 +2473,7 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
         }
 
         for (Creep creep : neutralCreeps) {
-            if (!isHostileCreep(creep)) {
+            if (!isAttackablePlayerCreepTarget(creep)) {
                 continue;
             }
 
@@ -2507,11 +2516,47 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
     }
 
     private boolean isHostileCreep(Creep creep) {
-        return creep.hp > 0 && (creep.team == Team.DARK || creep.team == Team.NEUTRAL);
+        return creep.hp > 0 && (creep.team == Team.NEUTRAL || creep.team != player.team);
     }
 
     private boolean isHostileStructure(Structure structure) {
-        return structure.hp > 0 && structure.team == Team.DARK;
+        return structure.hp > 0 && structure.team != player.team;
+    }
+
+    private boolean isFriendlyDenyableCreep(Creep creep) {
+        return creep != null
+                && creep.hp > 0
+                && creep.role == CreepRole.LANE
+                && creep.team == player.team
+                && creep.team != Team.NEUTRAL
+                && creep.hp * 2 < creep.maxHp;
+    }
+
+    private boolean isAttackablePlayerCreepTarget(Creep creep) {
+        return isHostileCreep(creep) || isFriendlyDenyableCreep(creep);
+    }
+
+    private boolean isValidPlayerAttackTarget(CombatEntity target) {
+        if (target == null || !target.isAlive()) {
+            return false;
+        }
+        if (target instanceof Player hero) {
+            return isHostileHero(hero);
+        }
+        if (target instanceof Creep creep) {
+            return isAttackablePlayerCreepTarget(creep);
+        }
+        if (target instanceof Structure structure) {
+            return isHostileStructure(structure);
+        }
+        return false;
+    }
+
+    private boolean shouldPlayerReceiveCreepXp(Creep creep) {
+        if (creep.role != CreepRole.LANE || creep.team == Team.NEUTRAL) {
+            return true;
+        }
+        return creep.team.opposite() == player.team;
     }
 
     private void switchWeapon(WeaponType weapon) {
@@ -2528,6 +2573,11 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
     private void refreshPlayerAttackOrderForCurrentWeapon() {
         playerPathRefreshCooldown = 0.0;
         if (playerAttackTarget == null || !playerAttackTarget.isAlive()) {
+            clearPlayerOrders();
+            return;
+        }
+        if (!isValidPlayerAttackTarget(playerAttackTarget)) {
+            clearPlayerOrders();
             return;
         }
 

@@ -6,6 +6,7 @@ import com.example.demo.game.model.StructureType;
 import com.example.demo.game.model.Team;
 import com.example.demo.game.world.GameMap;
 import com.example.demo.game.world.element.GroundKind;
+import com.example.demo.game.world.element.PropKind;
 
 import java.awt.Point;
 import java.io.IOException;
@@ -40,7 +41,9 @@ public final class MapBlueprintWriter {
         out.append("# rk1 rock\n");
         out.append("# bh1 bush\n");
         out.append("# st1 stump\n");
-        out.append("# pb1 pebbles\n\n");
+        out.append("# pb1 pebbles\n");
+        out.append("# tv0..tv3 tree_variant\n");
+        out.append("# tt0..tt4 tree_tint(-2..2)\n\n");
 
         out.append("size ").append(map.getWidth()).append(' ').append(map.getHeight()).append('\n');
         out.append("player_start ").append(playerStart.x).append(' ').append(playerStart.y).append('\n');
@@ -149,7 +152,18 @@ public final class MapBlueprintWriter {
                 case PEBBLES -> "pb1";
             });
         }
+        if (usesTreeRendering(map, x, y)) {
+            layers.add("tv" + map.getTreeVariant(x, y));
+            layers.add("tt" + (map.getTreeTint(x, y) + 2));
+        }
         return String.join("+", layers);
+    }
+
+    private boolean usesTreeRendering(GameMap map, int x, int y) {
+        if (!map.isBlocked(x, y)) {
+            return false;
+        }
+        return map.getProp(x, y) == null || map.getProp(x, y).kind() != PropKind.BOULDER;
     }
 
     private int tileIndex(GameMap map, double worldCoord) {

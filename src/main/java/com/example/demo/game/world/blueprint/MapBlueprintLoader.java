@@ -26,11 +26,7 @@ public final class MapBlueprintLoader {
     public MapBlueprint load(String resourcePath) {
         Path filePath = resolveProjectResourcePath(resourcePath);
         if (Files.exists(filePath)) {
-            try {
-                return parse(Files.readAllLines(filePath, StandardCharsets.UTF_8));
-            } catch (IOException e) {
-                throw new IllegalStateException("Failed to load map blueprint from file: " + filePath, e);
-            }
+            return load(filePath);
         }
 
         try (InputStream in = MapBlueprintLoader.class.getResourceAsStream(resourcePath)) {
@@ -41,6 +37,14 @@ public final class MapBlueprintLoader {
             return parse(lines);
         } catch (IOException e) {
             throw new IllegalStateException("Failed to load map blueprint: " + resourcePath, e);
+        }
+    }
+
+    public MapBlueprint load(Path filePath) {
+        try {
+            return parse(Files.readAllLines(filePath, StandardCharsets.UTF_8));
+        } catch (IOException e) {
+            throw new IllegalStateException("Failed to load map blueprint from file: " + filePath, e);
         }
     }
 
@@ -104,6 +108,8 @@ public final class MapBlueprintLoader {
         GroundElement[][] ground = new GroundElement[height][width];
         WaterElement[][] water = new WaterElement[height][width];
         PropElement[][] props = new PropElement[height][width];
+        int[][] treeVariant = new int[height][width];
+        int[][] treeTint = new int[height][width];
         boolean[][] blocked = new boolean[height][width];
         boolean[][] lane = new boolean[height][width];
         int[][] laneMask = new int[height][width];
@@ -118,13 +124,15 @@ public final class MapBlueprintLoader {
                 ground[y][x] = tile.ground();
                 water[y][x] = tile.water();
                 props[y][x] = tile.prop();
+                treeVariant[y][x] = tile.treeVariant();
+                treeTint[y][x] = tile.treeTint();
                 blocked[y][x] = tile.blocked();
                 lane[y][x] = tile.lane();
                 laneMask[y][x] = tile.laneMask();
             }
         }
 
-        return new MapBlueprint(width, height, ground, water, props, blocked, lane, laneMask,
+        return new MapBlueprint(width, height, ground, water, props, treeVariant, treeTint, blocked, lane, laneMask,
                 playerStart, lightThrone, darkThrone, lanePaths, towerTiles);
     }
 
@@ -133,11 +141,21 @@ public final class MapBlueprintLoader {
         GroundElement ground = null;
         WaterElement water = null;
         PropElement prop = null;
+        int treeVariant = MapBlueprint.NO_TREE_VARIANT;
+        int treeTint = MapBlueprint.NO_TREE_TINT;
         boolean blocked = false;
         boolean blockedExplicit = false;
         int laneMask = 0;
 
         for (String layer : layers) {
+            if (layer.startsWith("tv")) {
+                treeVariant = parseTreeVariant(layer);
+                continue;
+            }
+            if (layer.startsWith("tt")) {
+                treeTint = parseTreeTint(layer);
+                continue;
+            }
             switch (layer) {
                 case "gr1" -> ground = MapElements.GRASS;
                 case "gr2" -> ground = MapElements.GRASS_ALT;
@@ -176,7 +194,7 @@ public final class MapBlueprintLoader {
             blocked = true;
         }
 
-        return new TileLayers(ground, water, prop, blocked, laneMask != 0, laneMask);
+        return new TileLayers(ground, water, prop, treeVariant, treeTint, blocked, laneMask != 0, laneMask);
     }
 
     private EnumMap<LaneType, List<Point>> initLaneMap() {
@@ -228,9 +246,27 @@ public final class MapBlueprintLoader {
         return lines;
     }
 
+    private int parseTreeVariant(String layer) {
+        int value = Integer.parseInt(layer.substring(2));
+        if (value < 0 || value > 3) {
+            throw new IllegalArgumentException("Unknown tree variant code: " + layer);
+        }
+        return value;
+    }
+
+    private int parseTreeTint(String layer) {
+        int value = Integer.parseInt(layer.substring(2));
+        if (value < 0 || value > 4) {
+            throw new IllegalArgumentException("Unknown tree tint code: " + layer);
+        }
+        return value - 2;
+    }
+
     private record TileLayers(GroundElement ground,
                               WaterElement water,
                               PropElement prop,
+                              int treeVariant,
+                              int treeTint,
                               boolean blocked,
                               boolean lane,
                               int laneMask) {

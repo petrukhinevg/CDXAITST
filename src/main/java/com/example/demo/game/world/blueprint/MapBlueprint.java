@@ -15,11 +15,16 @@ import java.util.List;
 import java.util.Random;
 
 public final class MapBlueprint {
+    static final int NO_TREE_VARIANT = -1;
+    static final int NO_TREE_TINT = Integer.MIN_VALUE;
+
     private final int width;
     private final int height;
     private final GroundElement[][] ground;
     private final WaterElement[][] water;
     private final PropElement[][] props;
+    private final int[][] treeVariant;
+    private final int[][] treeTint;
     private final boolean[][] blocked;
     private final boolean[][] lane;
     private final int[][] laneMask;
@@ -34,6 +39,8 @@ public final class MapBlueprint {
                         GroundElement[][] ground,
                         WaterElement[][] water,
                         PropElement[][] props,
+                        int[][] treeVariant,
+                        int[][] treeTint,
                         boolean[][] blocked,
                         boolean[][] lane,
                         int[][] laneMask,
@@ -47,6 +54,8 @@ public final class MapBlueprint {
         this.ground = ground;
         this.water = water;
         this.props = props;
+        this.treeVariant = treeVariant;
+        this.treeTint = treeTint;
         this.blocked = blocked;
         this.lane = lane;
         this.laneMask = laneMask;
@@ -69,6 +78,12 @@ public final class MapBlueprint {
                 map.setGround(x, y, ground[y][x]);
                 map.setWater(x, y, water[y][x]);
                 map.setProp(x, y, props[y][x]);
+                if (treeVariant[y][x] != NO_TREE_VARIANT) {
+                    map.setTreeVariant(x, y, treeVariant[y][x]);
+                }
+                if (treeTint[y][x] != NO_TREE_TINT) {
+                    map.setTreeTint(x, y, treeTint[y][x]);
+                }
                 map.setBlocked(x, y, blocked[y][x]);
                 map.setLane(x, y, lane[y][x]);
                 map.setLaneMask(x, y, laneMask[y][x]);
