@@ -1,5 +1,7 @@
 package com.example.demo.game;
 
+import com.example.demo.game.audio.SimpleSoundPlayer;
+import com.example.demo.game.audio.SoundEffect;
 import com.example.demo.game.collision.UnitCollisionResolver;
 import com.example.demo.game.config.GameConfig;
 import com.example.demo.game.model.AnimationState;
@@ -126,6 +128,7 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
     private final HudRenderer hudRenderer = new HudRenderer();
     private final MapRenderer mapRenderer = new MapRenderer();
     private final SpriteLibrary sprites = SpriteLibrary.loadDefault();
+    private final SimpleSoundPlayer soundPlayer = new SimpleSoundPlayer();
 
     private final Player player = new Player();
     private final List<Player> heroes = new ArrayList<>();
@@ -733,6 +736,7 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
         playerOrderX = canOccupy(player, clampedX, clampedY) ? clampedX : map.tileCenter(goalTile.x);
         playerOrderY = canOccupy(player, clampedX, clampedY) ? clampedY : map.tileCenter(goalTile.y);
         applyPlayerPath(path, playerOrderX, playerOrderY);
+        soundPlayer.play(SoundEffect.MOVE_ORDER);
     }
 
     private void issueAttackOrder(CombatEntity target) {
@@ -743,6 +747,7 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
 
         playerAttackTarget = target;
         rebuildPlayerAttackPath(target);
+        soundPlayer.play(SoundEffect.ATTACK_ORDER);
     }
 
     private void addClickMarker(double worldX, double worldY, boolean attack) {
@@ -1016,6 +1021,7 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
         player.attackAnimationTimer = currentWeapon.attackAnimationTime();
         player.animPhase = 0.0;
         attackCooldown = currentWeapon.cooldown();
+        soundPlayer.play(currentWeapon.projectile() ? SoundEffect.RANGED_ATTACK : SoundEffect.MELEE_ATTACK);
 
         if (currentWeapon.projectile()) {
             fireProjectile(currentWeapon);
@@ -1902,6 +1908,9 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
         creep.lastHitByHero = true;
         creep.lastHitByCreep = false;
         damageEntity(creep, damage);
+        if (creep.hp <= 0) {
+            soundPlayer.play(SoundEffect.ENEMY_DOWN);
+        }
     }
 
     private void damageCreepByCreep(Creep creep, int damage) {
@@ -1917,7 +1926,11 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
     }
 
     private void damageStructure(Structure structure, int damage) {
+        int previousHp = structure.hp;
         damageEntity(structure, damage);
+        if (previousHp > 0 && structure.hp <= 0) {
+            soundPlayer.play(SoundEffect.ENEMY_DOWN);
+        }
     }
 
     private void damageHero(Player hero, int damage) {
@@ -1926,6 +1939,11 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
         }
         hero.hitCooldown = 0.35;
         damageEntity(hero, damage);
+        if (hero == player) {
+            soundPlayer.play(SoundEffect.PLAYER_HIT);
+        } else if (hero.hp <= 0) {
+            soundPlayer.play(SoundEffect.ENEMY_DOWN);
+        }
         if (hero.hp <= 0) {
             hero.hp = 0;
             hero.respawnTimer = HERO_RESPAWN_TIME;
@@ -2044,9 +2062,11 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
             gameOver = true;
             victoryText = "Силы тьмы победили";
             player.state = AnimationState.DEAD;
+            soundPlayer.play(SoundEffect.DEFEAT);
         } else if (darkThrone.hp <= 0) {
             gameOver = true;
             victoryText = "Силы света победили";
+            soundPlayer.play(SoundEffect.VICTORY);
         }
     }
 
@@ -3025,6 +3045,7 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
     }
 
     private void drawStructures(Graphics2D g2) {
+        Stroke oldStroke = g2.getStroke();
         for (Structure s : structures) {
             if (s.hp <= 0) {
                 continue;
@@ -3034,27 +3055,212 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
             int sy = worldToScreenY(s.y);
             int r = (int) Math.round(s.radius * ZOOM);
 
-            Color body = s.team == Team.LIGHT ? new Color(128, 186, 255) : new Color(236, 100, 92);
-            Color border = s.team == Team.LIGHT ? new Color(38, 82, 136) : new Color(128, 45, 40);
-
             if (s.type == StructureType.TOWER) {
-                g2.setColor(body);
-                g2.fillOval(sx - r, sy - r, r * 2, r * 2);
-                g2.setColor(border);
-                g2.setStroke(new BasicStroke((float) (2.2f * ZOOM / 2.0)));
-                g2.drawOval(sx - r, sy - r, r * 2, r * 2);
+                if (s.team == Team.LIGHT) {
+                    drawLightTower(g2, sx, sy, r);
+                } else {
+                    drawDarkDragonTower(g2, sx, sy, r);
+                }
             } else {
-                g2.setColor(body);
-                g2.fillOval(sx - r, sy - r, r * 2, r * 2);
-                g2.setColor(border);
-                g2.setStroke(new BasicStroke((float) (3f * ZOOM / 2.0)));
-                g2.drawOval(sx - r, sy - r, r * 2, r * 2);
+                if (s.team == Team.LIGHT) {
+                    drawFountain(g2, sx, sy, r,
+                            new Color(204, 223, 240),
+                            new Color(106, 132, 156),
+                            new Color(92, 205, 255, 210),
+                            new Color(226, 249, 255, 225),
+                            new Color(132, 220, 255, 90));
+                } else {
+                    drawFountain(g2, sx, sy, r,
+                            new Color(74, 50, 54),
+                            new Color(36, 24, 28),
+                            new Color(178, 24, 32, 218),
+                            new Color(255, 118, 110, 228),
+                            new Color(196, 42, 46, 90));
+                }
             }
 
             drawHealthBar(g2, sx, sy - r - 12, 54, 7,
                     (double) s.hp / s.maxHp,
                     s.team == Team.LIGHT ? new Color(88, 168, 255) : new Color(248, 96, 88));
         }
+        g2.setStroke(oldStroke);
+    }
+
+    private void drawLightTower(Graphics2D g2, int sx, int sy, int r) {
+        g2.setColor(new Color(42, 64, 86, 48));
+        g2.fillOval(sx - (int) (r * 1.05), sy + (int) (r * 0.52), (int) (r * 2.1), (int) (r * 0.62));
+
+        g2.setColor(new Color(166, 194, 222));
+        g2.fillRoundRect(sx - (int) (r * 0.88), sy + (int) (r * 0.18), (int) (r * 1.76), (int) (r * 0.42), 12, 12);
+        g2.setColor(new Color(96, 128, 160));
+        g2.drawRoundRect(sx - (int) (r * 0.88), sy + (int) (r * 0.18), (int) (r * 1.76), (int) (r * 0.42), 12, 12);
+
+        g2.setColor(new Color(214, 232, 246));
+        g2.fillRoundRect(sx - (int) (r * 0.54), sy - (int) (r * 0.96), (int) (r * 1.08), (int) (r * 1.44), 14, 14);
+        g2.setColor(new Color(104, 136, 168));
+        g2.drawRoundRect(sx - (int) (r * 0.54), sy - (int) (r * 0.96), (int) (r * 1.08), (int) (r * 1.44), 14, 14);
+
+        Path2D buttressLeft = new Path2D.Double();
+        buttressLeft.moveTo(sx - r * 0.54, sy + r * 0.3);
+        buttressLeft.lineTo(sx - r * 0.92, sy + r * 0.54);
+        buttressLeft.lineTo(sx - r * 0.78, sy - r * 0.12);
+        buttressLeft.lineTo(sx - r * 0.54, sy - r * 0.04);
+        buttressLeft.closePath();
+        Path2D buttressRight = new Path2D.Double();
+        buttressRight.moveTo(sx + r * 0.54, sy + r * 0.3);
+        buttressRight.lineTo(sx + r * 0.92, sy + r * 0.54);
+        buttressRight.lineTo(sx + r * 0.78, sy - r * 0.12);
+        buttressRight.lineTo(sx + r * 0.54, sy - r * 0.04);
+        buttressRight.closePath();
+        g2.setColor(new Color(178, 204, 226));
+        g2.fill(buttressLeft);
+        g2.fill(buttressRight);
+
+        g2.setColor(new Color(170, 198, 224));
+        g2.fillRoundRect(sx - (int) (r * 0.76), sy - (int) (r * 1.14), (int) (r * 1.52), (int) (r * 0.28), 8, 8);
+        g2.setColor(new Color(96, 128, 160));
+        g2.drawRoundRect(sx - (int) (r * 0.76), sy - (int) (r * 1.14), (int) (r * 1.52), (int) (r * 0.28), 8, 8);
+        for (int i = -1; i <= 1; i++) {
+            g2.setColor(new Color(208, 229, 246));
+            g2.fillRect(sx + (int) (i * r * 0.28) - (int) (r * 0.1), sy - (int) (r * 1.28), (int) (r * 0.2), (int) (r * 0.18));
+            g2.setColor(new Color(96, 128, 160));
+            g2.drawRect(sx + (int) (i * r * 0.28) - (int) (r * 0.1), sy - (int) (r * 1.28), (int) (r * 0.2), (int) (r * 0.18));
+        }
+
+        g2.setColor(new Color(92, 182, 255, 70));
+        g2.fillOval(sx - (int) (r * 0.52), sy - (int) (r * 1.9), (int) (r * 1.04), (int) (r * 1.04));
+
+        Path2D diamond = new Path2D.Double();
+        diamond.moveTo(sx, sy - r * 1.66);
+        diamond.lineTo(sx + r * 0.28, sy - r * 1.38);
+        diamond.lineTo(sx, sy - r * 1.06);
+        diamond.lineTo(sx - r * 0.28, sy - r * 1.38);
+        diamond.closePath();
+        g2.setColor(new Color(238, 251, 255));
+        g2.fill(diamond);
+        g2.setColor(new Color(82, 172, 238));
+        g2.draw(diamond);
+        g2.setColor(new Color(148, 224, 255, 180));
+        g2.drawLine(sx, sy - (int) (r * 1.58), sx, sy - (int) (r * 1.12));
+
+        g2.setColor(new Color(114, 162, 206, 170));
+        g2.fillRoundRect(sx - (int) (r * 0.12), sy - (int) (r * 0.74), (int) (r * 0.24), (int) (r * 0.62), 6, 6);
+    }
+
+    private void drawDarkDragonTower(Graphics2D g2, int sx, int sy, int r) {
+        g2.setColor(new Color(16, 10, 12, 58));
+        g2.fillOval(sx - (int) (r * 1.12), sy + (int) (r * 0.5), (int) (r * 2.24), (int) (r * 0.66));
+
+        g2.setColor(new Color(76, 60, 64));
+        g2.fillRoundRect(sx - (int) (r * 0.92), sy + (int) (r * 0.2), (int) (r * 1.84), (int) (r * 0.38), 12, 12);
+        g2.setColor(new Color(32, 24, 28));
+        g2.drawRoundRect(sx - (int) (r * 0.92), sy + (int) (r * 0.2), (int) (r * 1.84), (int) (r * 0.38), 12, 12);
+
+        g2.setColor(new Color(90, 74, 78));
+        g2.fillRoundRect(sx - (int) (r * 0.3), sy - (int) (r * 0.44), (int) (r * 0.6), (int) (r * 0.96), 10, 10);
+        g2.setColor(new Color(34, 24, 28));
+        g2.drawRoundRect(sx - (int) (r * 0.3), sy - (int) (r * 0.44), (int) (r * 0.6), (int) (r * 0.96), 10, 10);
+
+        Path2D leftWing = new Path2D.Double();
+        leftWing.moveTo(sx - r * 0.16, sy - r * 0.16);
+        leftWing.lineTo(sx - r * 1.06, sy - r * 0.92);
+        leftWing.lineTo(sx - r * 0.92, sy - r * 0.14);
+        leftWing.lineTo(sx - r * 1.02, sy + r * 0.22);
+        leftWing.lineTo(sx - r * 0.42, sy + r * 0.12);
+        leftWing.closePath();
+        Path2D rightWing = new Path2D.Double();
+        rightWing.moveTo(sx + r * 0.16, sy - r * 0.16);
+        rightWing.lineTo(sx + r * 1.06, sy - r * 0.92);
+        rightWing.lineTo(sx + r * 0.92, sy - r * 0.14);
+        rightWing.lineTo(sx + r * 1.02, sy + r * 0.22);
+        rightWing.lineTo(sx + r * 0.42, sy + r * 0.12);
+        rightWing.closePath();
+        g2.setColor(new Color(64, 52, 56));
+        g2.fill(leftWing);
+        g2.fill(rightWing);
+        g2.setColor(new Color(22, 16, 18));
+        g2.draw(leftWing);
+        g2.draw(rightWing);
+
+        Path2D neck = new Path2D.Double();
+        neck.moveTo(sx - r * 0.14, sy - r * 0.58);
+        neck.lineTo(sx + r * 0.14, sy - r * 0.58);
+        neck.lineTo(sx + r * 0.22, sy - r * 1.18);
+        neck.lineTo(sx - r * 0.22, sy - r * 1.18);
+        neck.closePath();
+        g2.setColor(new Color(82, 66, 72));
+        g2.fill(neck);
+        g2.setColor(new Color(24, 18, 20));
+        g2.draw(neck);
+
+        Path2D head = new Path2D.Double();
+        head.moveTo(sx, sy - r * 1.52);
+        head.lineTo(sx + r * 0.34, sy - r * 1.18);
+        head.lineTo(sx + r * 0.24, sy - r * 0.84);
+        head.lineTo(sx, sy - r * 0.72);
+        head.lineTo(sx - r * 0.24, sy - r * 0.84);
+        head.lineTo(sx - r * 0.34, sy - r * 1.18);
+        head.closePath();
+        g2.setColor(new Color(96, 76, 82));
+        g2.fill(head);
+        g2.setColor(new Color(28, 20, 22));
+        g2.draw(head);
+
+        g2.setStroke(new BasicStroke(1.4f));
+        g2.setColor(new Color(28, 20, 22));
+        g2.drawLine(sx - (int) (r * 0.12), sy - (int) (r * 1.46), sx - (int) (r * 0.3), sy - (int) (r * 1.68));
+        g2.drawLine(sx + (int) (r * 0.12), sy - (int) (r * 1.46), sx + (int) (r * 0.3), sy - (int) (r * 1.68));
+        g2.setColor(new Color(255, 110, 96, 220));
+        g2.fillOval(sx - (int) (r * 0.16), sy - (int) (r * 1.16), (int) (r * 0.12), (int) (r * 0.12));
+        g2.fillOval(sx + (int) (r * 0.04), sy - (int) (r * 1.16), (int) (r * 0.12), (int) (r * 0.12));
+    }
+
+    private void drawFountain(Graphics2D g2,
+                              int sx,
+                              int sy,
+                              int r,
+                              Color stoneLight,
+                              Color stoneDark,
+                              Color liquidMain,
+                              Color liquidBright,
+                              Color glow) {
+        g2.setColor(new Color(18, 28, 32, 46));
+        g2.fillOval(sx - (int) (r * 1.2), sy + (int) (r * 0.46), (int) (r * 2.4), (int) (r * 0.72));
+
+        g2.setColor(stoneDark);
+        g2.fillOval(sx - (int) (r * 1.02), sy + (int) (r * 0.24), (int) (r * 2.04), (int) (r * 0.66));
+        g2.setColor(stoneLight);
+        g2.fillOval(sx - (int) (r * 0.9), sy + (int) (r * 0.12), (int) (r * 1.8), (int) (r * 0.5));
+        g2.setColor(liquidMain);
+        g2.fillOval(sx - (int) (r * 0.72), sy + (int) (r * 0.22), (int) (r * 1.44), (int) (r * 0.26));
+
+        g2.setColor(stoneLight);
+        g2.fillRoundRect(sx - (int) (r * 0.22), sy - (int) (r * 0.66), (int) (r * 0.44), (int) (r * 0.96), 12, 12);
+        g2.setColor(stoneDark);
+        g2.drawRoundRect(sx - (int) (r * 0.22), sy - (int) (r * 0.66), (int) (r * 0.44), (int) (r * 0.96), 12, 12);
+
+        g2.setColor(stoneDark);
+        g2.fillOval(sx - (int) (r * 0.54), sy - (int) (r * 0.52), (int) (r * 1.08), (int) (r * 0.46));
+        g2.setColor(stoneLight);
+        g2.fillOval(sx - (int) (r * 0.46), sy - (int) (r * 0.6), (int) (r * 0.92), (int) (r * 0.34));
+        g2.setColor(liquidMain);
+        g2.fillOval(sx - (int) (r * 0.28), sy - (int) (r * 0.52), (int) (r * 0.56), (int) (r * 0.18));
+
+        g2.setStroke(new BasicStroke(2.0f));
+        g2.setColor(glow);
+        g2.drawLine(sx, sy - (int) (r * 0.92), sx - (int) (r * 0.22), sy - (int) (r * 0.42));
+        g2.drawLine(sx, sy - (int) (r * 0.92), sx + (int) (r * 0.22), sy - (int) (r * 0.42));
+        g2.drawLine(sx, sy - (int) (r * 0.92), sx, sy - (int) (r * 0.3));
+
+        g2.setColor(liquidBright);
+        g2.fillOval(sx - (int) (r * 0.12), sy - (int) (r * 1.04), (int) (r * 0.24), (int) (r * 0.24));
+        g2.setColor(glow);
+        g2.fillOval(sx - (int) (r * 0.34), sy - (int) (r * 1.24), (int) (r * 0.68), (int) (r * 0.54));
+
+        g2.setColor(stoneDark);
+        g2.setStroke(new BasicStroke(1.4f));
+        g2.drawOval(sx - (int) (r * 1.02), sy + (int) (r * 0.24), (int) (r * 2.04), (int) (r * 0.66));
+        g2.drawOval(sx - (int) (r * 0.54), sy - (int) (r * 0.52), (int) (r * 1.08), (int) (r * 0.46));
     }
 
     private void drawClickMarkers(Graphics2D g2) {
@@ -3599,6 +3805,10 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
 
     @Override
     public void keyPressed(KeyEvent e) {
+        if (e.getKeyCode() == KeyEvent.VK_F1) {
+            centerCameraOnPlayer();
+            return;
+        }
         if (e.getKeyCode() == KeyEvent.VK_TAB) {
             toggleEditorMode();
             return;
@@ -3794,6 +4004,7 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
     @Override
     public void removeNotify() {
         gameTimer.stop();
+        soundPlayer.close();
         super.removeNotify();
     }
 
