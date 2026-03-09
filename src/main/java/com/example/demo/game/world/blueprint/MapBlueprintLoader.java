@@ -13,26 +13,40 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.EnumMap;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 
 public final class MapBlueprintLoader {
     private static final String GRID_MARKER = "grid";
+    private static final Path RESOURCE_ROOT = Path.of("src/main/resources");
 
     public MapBlueprint load(String resourcePath) {
+        Path filePath = resolveProjectResourcePath(resourcePath);
+        if (Files.exists(filePath)) {
+            try {
+                return parse(Files.readAllLines(filePath, StandardCharsets.UTF_8));
+            } catch (IOException e) {
+                throw new IllegalStateException("Failed to load map blueprint from file: " + filePath, e);
+            }
+        }
+
         try (InputStream in = MapBlueprintLoader.class.getResourceAsStream(resourcePath)) {
             if (in == null) {
                 throw new IllegalArgumentException("Map resource not found: " + resourcePath);
             }
-
             List<String> lines = readLines(in);
             return parse(lines);
         } catch (IOException e) {
             throw new IllegalStateException("Failed to load map blueprint: " + resourcePath, e);
         }
+    }
+
+    private Path resolveProjectResourcePath(String resourcePath) {
+        String normalized = resourcePath.startsWith("/") ? resourcePath.substring(1) : resourcePath;
+        return RESOURCE_ROOT.resolve(normalized);
     }
 
     private MapBlueprint parse(List<String> lines) {
@@ -120,6 +134,7 @@ public final class MapBlueprintLoader {
         WaterElement water = null;
         PropElement prop = null;
         boolean blocked = false;
+        boolean blockedExplicit = false;
         int laneMask = 0;
 
         for (String layer : layers) {
@@ -132,6 +147,10 @@ public final class MapBlueprintLoader {
                 case "wd1" -> {
                     ground = MapElements.FOREST;
                     blocked = true;
+                }
+                case "bl1" -> {
+                    blocked = true;
+                    blockedExplicit = true;
                 }
                 case "rv1" -> water = MapElements.RIVER;
                 case "l1" -> laneMask |= laneBit(LaneType.TOP);
@@ -147,6 +166,9 @@ public final class MapBlueprintLoader {
 
         if (ground == null) {
             throw new IllegalArgumentException("Tile must define a ground layer: " + token);
+        }
+        if (ground == MapElements.FOREST && !blockedExplicit) {
+            blocked = true;
         }
 
         return new TileLayers(ground, water, prop, blocked, laneMask != 0, laneMask);

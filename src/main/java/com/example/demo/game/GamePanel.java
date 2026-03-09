@@ -23,7 +23,12 @@ import com.example.demo.game.render.SpriteLibrary;
 import com.example.demo.game.world.GameMap;
 import com.example.demo.game.world.blueprint.MapBlueprint;
 import com.example.demo.game.world.blueprint.MapBlueprintLoader;
+import com.example.demo.game.world.blueprint.MapBlueprintWriter;
+import com.example.demo.game.world.element.GroundElement;
 import com.example.demo.game.world.element.GroundKind;
+import com.example.demo.game.world.element.MapElements;
+import com.example.demo.game.world.element.PropElement;
+import com.example.demo.game.world.element.WaterElement;
 
 import javax.swing.JPanel;
 import javax.swing.Timer;
@@ -35,6 +40,7 @@ import java.awt.Font;
 import java.awt.Graphics;
 import java.awt.Graphics2D;
 import java.awt.GraphicsEnvironment;
+import java.awt.Rectangle;
 import java.awt.AlphaComposite;
 import java.awt.Composite;
 import java.awt.geom.Path2D;
@@ -43,6 +49,8 @@ import java.awt.Point;
 import java.awt.RenderingHints;
 import java.awt.Stroke;
 import java.awt.image.BufferedImage;
+import java.io.IOException;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -87,6 +95,14 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
     private static final double CREEP_STRUCTURE_AVOID_WEIGHT = 1.3;
     private static final double CREEP_FORWARD_WEIGHT = 0.18;
     private static final int MAX_CREEPS_ATTACKING_TOWER = 2;
+    private static final int EDITOR_PANEL_WIDTH = 312;
+    private static final int EDITOR_PANEL_MARGIN = 16;
+    private static final int EDITOR_PANEL_PAD = 14;
+    private static final int EDITOR_BUTTON_HEIGHT = 26;
+    private static final int EDITOR_BUTTON_GAP = 6;
+    private static final int EDITOR_SWATCH_SIZE = 34;
+    private static final Path MAP_EDITOR_SAVE_PATH = Path.of("src/main/resources/maps/default.map");
+    private static final double EDITOR_PANEL_EDGE_SWITCH_DISTANCE = GameConfig.TILE * 2.0;
     private static final double TREE_PLACEMENT_CHANCE = 0.18;
     private static final int TREE_LANE_CLEAR_RADIUS = 3;
     private static final int MAX_TREES_PER_ROW = 10;
@@ -106,6 +122,7 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
     private final GameMap map = new GameMap();
     private final UnitCollisionResolver unitCollisionResolver = new UnitCollisionResolver();
     private final MapBlueprintLoader mapBlueprintLoader = new MapBlueprintLoader();
+    private final MapBlueprintWriter mapBlueprintWriter = new MapBlueprintWriter();
     private final HudRenderer hudRenderer = new HudRenderer();
     private final MapRenderer mapRenderer = new MapRenderer();
     private final SpriteLibrary sprites = SpriteLibrary.loadDefault();
@@ -140,6 +157,8 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
     private boolean showAttackRanges;
     private boolean middleMouseDragging;
     private boolean miniMapDragging;
+    private boolean editorMode;
+    private boolean editorPainting;
     private boolean mouseInsideWindow;
     private int dragLastMouseX;
     private int dragLastMouseY;
@@ -175,11 +194,22 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
     private int framesThisSecond;
     private long fpsWindowStartNanos;
     private int laneCreepSpawnSequence;
+    private EditorTool editorTool = EditorTool.PAINT;
+    private GroundElement editorGround = MapElements.GRASS;
+    private WaterElement editorWater;
+    private PropElement editorProp;
+    private int editorLaneMask;
+    private boolean editorBlocked;
+    private Structure editorDraggedStructure;
+    private String editorStatusText = "Tab: editor mode";
+    private double editorStatusTimer;
+    private boolean editorDirty;
 
     public GamePanel() {
         setPreferredSize(new Dimension(GameConfig.VIEW_W, GameConfig.VIEW_H));
         setBackground(new Color(16, 32, 18));
         setFocusable(true);
+        setFocusTraversalKeysEnabled(false);
         addKeyListener(this);
         addMouseMotionListener(this);
         addMouseListener(this);
@@ -221,7 +251,13 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
         kills = 0;
         gameOver = false;
         victoryText = "";
+        editorMode = false;
         laneCreepSpawnSequence = 0;
+        editorPainting = false;
+        editorDraggedStructure = null;
+        editorDirty = false;
+        editorStatusText = "Tab: editor mode";
+        editorStatusTimer = 0.0;
         clearPlayerOrders();
 
         spawnLaneWave();
@@ -491,7 +527,12 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
         double dt = Math.min((now - lastTickNanos) / 1_000_000_000.0, 0.033);
         lastTickNanos = now;
 
-        updateWorld(dt);
+        if (editorMode) {
+            editorStatusTimer = Math.max(0.0, editorStatusTimer - dt);
+            updateCamera(dt);
+        } else {
+            updateWorld(dt);
+        }
         repaint();
 
         framesThisSecond++;
@@ -2310,7 +2351,8 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
             velocityY += inputY / len * CAMERA_MOVE_SPEED;
         }
 
-        if (mouseInsideWindow && !middleMouseDragging && !miniMapDragging) {
+        if (mouseInsideWindow && !middleMouseDragging && !miniMapDragging
+                && !(editorMode && isInsideEditorPanel(mouseX, mouseY))) {
             double edgeX = 0.0;
             double edgeY = 0.0;
             int width = viewportWidth();
@@ -2366,6 +2408,433 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
         double visibleWorldH = viewportHeight() / ZOOM;
         cameraX = clamp(worldX - visibleWorldW / 2.0, 0.0, Math.max(0.0, map.getPixelWidth() - visibleWorldW));
         cameraY = clamp(worldY - visibleWorldH / 2.0, 0.0, Math.max(0.0, map.getPixelHeight() - visibleWorldH));
+    }
+
+    private int laneBit(LaneType laneType) {
+        return switch (laneType) {
+            case TOP -> 1;
+            case MID -> 1 << 1;
+            case BOT -> 1 << 2;
+        };
+    }
+
+    private Rectangle editorPanelBounds() {
+        int panelHeight = Math.min(viewportHeight() - EDITOR_PANEL_MARGIN * 2, 596);
+        int panelX = shouldDockEditorPanelLeft()
+                ? EDITOR_PANEL_MARGIN
+                : viewportWidth() - EDITOR_PANEL_WIDTH - EDITOR_PANEL_MARGIN;
+        return new Rectangle(
+                panelX,
+                EDITOR_PANEL_MARGIN,
+                EDITOR_PANEL_WIDTH,
+                panelHeight
+        );
+    }
+
+    private boolean shouldDockEditorPanelLeft() {
+        double visibleWorldW = viewportWidth() / ZOOM;
+        double maxCameraX = Math.max(0.0, map.getPixelWidth() - visibleWorldW);
+        return maxCameraX > 0.0 && cameraX >= maxCameraX - EDITOR_PANEL_EDGE_SWITCH_DISTANCE;
+    }
+
+    private boolean isInsideEditorPanel(int screenX, int screenY) {
+        return editorMode && editorPanelBounds().contains(screenX, screenY);
+    }
+
+    private EditorUi buildEditorUi() {
+        Rectangle panelBounds = editorPanelBounds();
+        List<EditorButton> buttons = new ArrayList<>();
+        List<EditorLabel> labels = new ArrayList<>();
+
+        int x = panelBounds.x + EDITOR_PANEL_PAD;
+        int y = panelBounds.y + EDITOR_PANEL_PAD + 20;
+        int contentW = panelBounds.width - EDITOR_PANEL_PAD * 2;
+
+        labels.add(new EditorLabel("Editor", x, panelBounds.y + 18));
+        String status = editorStatusTimer > 0.0 ? editorStatusText : (editorDirty ? "Unsaved changes" : "Ctrl/Cmd+S to save");
+        labels.add(new EditorLabel(status, x, panelBounds.y + 36));
+
+        int wideW = (contentW - EDITOR_BUTTON_GAP * 2) / 3;
+        buttons.add(new EditorButton("tool:paint", new Rectangle(x, y, wideW, EDITOR_BUTTON_HEIGHT), "Paint",
+                editorTool == EditorTool.PAINT, new Color(76, 124, 108), Color.WHITE));
+        buttons.add(new EditorButton("tool:move", new Rectangle(x + wideW + EDITOR_BUTTON_GAP, y, wideW, EDITOR_BUTTON_HEIGHT), "Move",
+                editorTool == EditorTool.MOVE_STRUCTURE, new Color(110, 98, 70), Color.WHITE));
+        buttons.add(new EditorButton("save", new Rectangle(x + (wideW + EDITOR_BUTTON_GAP) * 2, y, wideW, EDITOR_BUTTON_HEIGHT), "Save",
+                false, new Color(62, 86, 132), Color.WHITE));
+
+        y += EDITOR_BUTTON_HEIGHT + 18;
+        labels.add(new EditorLabel("Ground", x, y - 6));
+        y = addEditorSwatchGrid(buttons, x, y, contentW, List.of(
+                new EditorButton("ground:grass", null, "Grass", editorGround == MapElements.GRASS, new Color(102, 146, 86), Color.BLACK),
+                new EditorButton("ground:grass_alt", null, "Grass+", editorGround == MapElements.GRASS_ALT, new Color(88, 131, 74), Color.WHITE),
+                new EditorButton("ground:dirt", null, "Dirt", editorGround == MapElements.DIRT, new Color(125, 103, 74), Color.WHITE),
+                new EditorButton("ground:high", null, "High", editorGround == MapElements.HIGH_GROUND, new Color(126, 160, 102), Color.BLACK),
+                new EditorButton("ground:base", null, "Base", editorGround == MapElements.BASE, new Color(126, 118, 108), Color.WHITE),
+                new EditorButton("ground:forest", null, "Forest", editorGround == MapElements.FOREST, new Color(86, 128, 76), Color.WHITE)
+        ), 3);
+
+        labels.add(new EditorLabel("Water", x, y - 6));
+        y = addEditorSwatchGrid(buttons, x, y, contentW, List.of(
+                new EditorButton("water:none", null, "Off", editorWater == null, new Color(58, 58, 58), Color.WHITE),
+                new EditorButton("water:river", null, "River", editorWater != null, new Color(74, 120, 160), Color.WHITE)
+        ), 2);
+
+        labels.add(new EditorLabel("Props", x, y - 6));
+        y = addEditorSwatchGrid(buttons, x, y, contentW, List.of(
+                new EditorButton("prop:none", null, "None", editorProp == null, new Color(56, 56, 56), Color.WHITE),
+                new EditorButton("prop:rock", null, "Rock", editorProp == MapElements.ROCK, new Color(104, 108, 114), Color.WHITE),
+                new EditorButton("prop:bush", null, "Bush", editorProp == MapElements.BUSH, new Color(54, 118, 64), Color.WHITE),
+                new EditorButton("prop:stump", null, "Stump", editorProp == MapElements.STUMP, new Color(130, 96, 60), Color.WHITE),
+                new EditorButton("prop:pebbles", null, "Pebbles", editorProp == MapElements.PEBBLES, new Color(132, 123, 108), Color.BLACK)
+        ), 3);
+
+        labels.add(new EditorLabel("Lane", x, y - 6));
+        y = addEditorSwatchGrid(buttons, x, y, contentW, List.of(
+                new EditorButton("lane:top", null, "Top", (editorLaneMask & laneBit(LaneType.TOP)) != 0, new Color(94, 128, 184), Color.WHITE),
+                new EditorButton("lane:mid", null, "Mid", (editorLaneMask & laneBit(LaneType.MID)) != 0, new Color(154, 112, 168), Color.WHITE),
+                new EditorButton("lane:bot", null, "Bot", (editorLaneMask & laneBit(LaneType.BOT)) != 0, new Color(190, 128, 84), Color.WHITE)
+        ), 3);
+
+        labels.add(new EditorLabel("Blocked", x, y - 6));
+        y = addEditorSwatchGrid(buttons, x, y, contentW, List.of(
+                new EditorButton("blocked:off", null, "Off", !editorBlocked, new Color(68, 68, 68), Color.WHITE),
+                new EditorButton("blocked:on", null, "On", editorBlocked, new Color(92, 116, 78), Color.WHITE)
+        ), 2);
+
+        Rectangle previewBounds = new Rectangle(x, y + 4, contentW, 86);
+        return new EditorUi(panelBounds, previewBounds, labels, buttons);
+    }
+
+    private int addEditorSwatchGrid(List<EditorButton> buttons, int x, int y, int width, List<EditorButton> template, int columns) {
+        int buttonW = (width - EDITOR_BUTTON_GAP * (columns - 1)) / columns;
+        int currentY = y;
+        for (int i = 0; i < template.size(); i++) {
+            EditorButton button = template.get(i);
+            int col = i % columns;
+            int row = i / columns;
+            int buttonX = x + col * (buttonW + EDITOR_BUTTON_GAP);
+            int buttonY = y + row * (EDITOR_SWATCH_SIZE + EDITOR_BUTTON_GAP);
+            buttons.add(new EditorButton(
+                    button.id(),
+                    new Rectangle(buttonX, buttonY, buttonW, EDITOR_SWATCH_SIZE),
+                    button.label(),
+                    button.selected(),
+                    button.fill(),
+                    button.text()
+            ));
+            currentY = buttonY + EDITOR_SWATCH_SIZE;
+        }
+        return currentY + 18;
+    }
+
+    private void drawEditorOverlay(Graphics2D g2) {
+        EditorUi ui = buildEditorUi();
+        Rectangle panel = ui.panelBounds();
+
+        g2.setColor(new Color(0, 0, 0, 188));
+        g2.fillRoundRect(panel.x, panel.y, panel.width, panel.height, 16, 16);
+        g2.setColor(new Color(232, 232, 232, 150));
+        g2.drawRoundRect(panel.x, panel.y, panel.width, panel.height, 16, 16);
+
+        g2.setFont(new Font("SansSerif", Font.BOLD, 16));
+        for (EditorLabel label : ui.labels()) {
+            g2.setColor(label.text().equals("Editor") ? Color.WHITE : new Color(222, 222, 222));
+            g2.drawString(label.text(), label.x(), label.y());
+        }
+
+        g2.setFont(new Font("SansSerif", Font.PLAIN, 12));
+        for (EditorButton button : ui.buttons()) {
+            drawEditorButton(g2, button);
+        }
+
+        Rectangle preview = ui.previewBounds();
+        g2.setColor(new Color(16, 16, 16, 180));
+        g2.fillRoundRect(preview.x, preview.y, preview.width, preview.height, 12, 12);
+        g2.setColor(new Color(220, 220, 220, 110));
+        g2.drawRoundRect(preview.x, preview.y, preview.width, preview.height, 12, 12);
+        g2.setColor(groundPreviewColor(editorGround));
+        g2.fillRoundRect(preview.x + 12, preview.y + 14, 48, 48, 10, 10);
+        if (editorWater != null) {
+            g2.setColor(new Color(88, 150, 194, 170));
+            g2.fillRoundRect(preview.x + 12, preview.y + 14, 48, 48, 10, 10);
+        }
+        if (editorBlocked) {
+            g2.setColor(new Color(40, 92, 48, 170));
+            g2.fillOval(preview.x + 20, preview.y + 20, 32, 28);
+        }
+        if (editorProp != null) {
+            g2.setColor(new Color(245, 245, 245, 220));
+            g2.drawString(propPreviewLabel(editorProp), preview.x + 22, preview.y + 45);
+        }
+
+        g2.setColor(Color.WHITE);
+        g2.drawString("Brush", preview.x + 72, preview.y + 24);
+        g2.drawString("Lane: " + laneMaskLabel(editorLaneMask), preview.x + 72, preview.y + 42);
+        g2.drawString("Blocked: " + (editorBlocked ? "yes" : "no"), preview.x + 72, preview.y + 58);
+        g2.drawString("Tab toggle, Ctrl/Cmd+S save", preview.x + 12, preview.y + 76);
+    }
+
+    private void drawEditorButton(Graphics2D g2, EditorButton button) {
+        Color fill = button.selected() ? brighten(button.fill(), 18) : button.fill();
+        g2.setColor(fill);
+        g2.fillRoundRect(button.bounds().x, button.bounds().y, button.bounds().width, button.bounds().height, 10, 10);
+        g2.setColor(button.selected() ? Color.WHITE : new Color(220, 220, 220, 180));
+        g2.drawRoundRect(button.bounds().x, button.bounds().y, button.bounds().width, button.bounds().height, 10, 10);
+
+        g2.setColor(button.text());
+        int textY = button.bounds().y + button.bounds().height / 2 + 4;
+        int textX = button.bounds().x + 8;
+        g2.drawString(button.label(), textX, textY);
+    }
+
+    private void drawEditorWorldOverlay(Graphics2D g2) {
+        if (isInsideEditorPanel(mouseX, mouseY) || isInsideMiniMap(mouseX, mouseY)) {
+            return;
+        }
+
+        int tileX = clampTile((int) (screenToWorldX(mouseX) / map.getTileSize()), map.getWidth());
+        int tileY = clampTile((int) (screenToWorldY(mouseY) / map.getTileSize()), map.getHeight());
+        int sx = worldToScreenX(tileX * map.getTileSize());
+        int sy = worldToScreenY(tileY * map.getTileSize());
+        int size = (int) Math.round(map.getTileSize() * ZOOM);
+
+        g2.setColor(new Color(255, 240, 160, 190));
+        g2.setStroke(new BasicStroke(1.4f));
+        g2.drawRect(sx, sy, size, size);
+
+        if (editorDraggedStructure != null) {
+            int px = worldToScreenX(editorDraggedStructure.x);
+            int py = worldToScreenY(editorDraggedStructure.y);
+            int r = (int) Math.round(editorDraggedStructure.radius * ZOOM);
+            g2.setColor(new Color(255, 218, 117, 180));
+            g2.drawOval(px - r, py - r, r * 2, r * 2);
+        }
+    }
+
+    private void toggleEditorMode() {
+        editorMode = !editorMode;
+        editorPainting = false;
+        editorDraggedStructure = null;
+        miniMapDragging = false;
+        middleMouseDragging = false;
+        clearPlayerOrders();
+        setEditorStatus(editorMode ? "Editor enabled" : "Editor disabled", 1.4);
+    }
+
+    private void saveEditedMap() {
+        try {
+            EnumMap<LaneType, List<Point>> baseLanePaths = new EnumMap<>(LaneType.class);
+            for (LaneType lane : LaneType.values()) {
+                baseLanePaths.put(lane, new ArrayList<>(lanePaths.get(Team.LIGHT).get(lane)));
+            }
+            mapBlueprintWriter.save(MAP_EDITOR_SAVE_PATH, map, mapBlueprint.playerStart(), baseLanePaths, structures);
+            editorDirty = false;
+            setEditorStatus("Map saved to default.map", 2.5);
+        } catch (IOException e) {
+            setEditorStatus("Save failed: " + e.getMessage(), 3.5);
+        }
+    }
+
+    private boolean isEditorSaveShortcut(KeyEvent e) {
+        return e.getKeyCode() == KeyEvent.VK_S && (e.isControlDown() || e.isMetaDown());
+    }
+
+    private void setEditorStatus(String text, double duration) {
+        editorStatusText = text;
+        editorStatusTimer = duration;
+    }
+
+    private boolean handleEditorPanelClick(int screenX, int screenY) {
+        for (EditorButton button : buildEditorUi().buttons()) {
+            if (button.bounds().contains(screenX, screenY)) {
+                applyEditorAction(button.id());
+                return true;
+            }
+        }
+        return isInsideEditorPanel(screenX, screenY);
+    }
+
+    private void applyEditorAction(String actionId) {
+        if (actionId.equals("save")) {
+            saveEditedMap();
+            return;
+        }
+        String[] parts = actionId.split(":", 2);
+        if (parts.length != 2) {
+            return;
+        }
+
+        switch (parts[0]) {
+            case "tool" -> editorTool = "move".equals(parts[1]) ? EditorTool.MOVE_STRUCTURE : EditorTool.PAINT;
+            case "ground" -> {
+                editorGround = switch (parts[1]) {
+                    case "grass" -> MapElements.GRASS;
+                    case "grass_alt" -> MapElements.GRASS_ALT;
+                    case "dirt" -> MapElements.DIRT;
+                    case "high" -> MapElements.HIGH_GROUND;
+                    case "base" -> MapElements.BASE;
+                    case "forest" -> MapElements.FOREST;
+                    default -> editorGround;
+                };
+                if (editorGround == MapElements.FOREST) {
+                    editorBlocked = true;
+                    editorProp = null;
+                    editorWater = null;
+                }
+            }
+            case "water" -> editorWater = "river".equals(parts[1]) ? MapElements.RIVER : null;
+            case "prop" -> editorProp = switch (parts[1]) {
+                case "rock" -> MapElements.ROCK;
+                case "bush" -> MapElements.BUSH;
+                case "stump" -> MapElements.STUMP;
+                case "pebbles" -> MapElements.PEBBLES;
+                default -> null;
+            };
+            case "lane" -> {
+                LaneType lane = switch (parts[1]) {
+                    case "top" -> LaneType.TOP;
+                    case "mid" -> LaneType.MID;
+                    case "bot" -> LaneType.BOT;
+                    default -> null;
+                };
+                if (lane != null) {
+                    int bit = laneBit(lane);
+                    editorLaneMask = (editorLaneMask & bit) != 0 ? editorLaneMask & ~bit : editorLaneMask | bit;
+                }
+            }
+            case "blocked" -> editorBlocked = "on".equals(parts[1]);
+            default -> {
+            }
+        }
+    }
+
+    private void applyEditorBrushAtScreen(int screenX, int screenY) {
+        int tileX = clampTile((int) (screenToWorldX(screenX) / map.getTileSize()), map.getWidth());
+        int tileY = clampTile((int) (screenToWorldY(screenY) / map.getTileSize()), map.getHeight());
+        applyEditorBrush(tileX, tileY);
+    }
+
+    private void applyEditorBrush(int tileX, int tileY) {
+        if (!map.inBounds(tileX, tileY)) {
+            return;
+        }
+
+        map.setGround(tileX, tileY, editorGround);
+        map.setWater(tileX, tileY, editorWater);
+        map.setProp(tileX, tileY, editorProp);
+        map.setBlocked(tileX, tileY, editorBlocked || editorGround == MapElements.FOREST);
+        map.setLaneMask(tileX, tileY, editorLaneMask);
+        if (map.isBlocked(tileX, tileY) && (editorGround == MapElements.GRASS || editorGround == MapElements.GRASS_ALT)) {
+            map.setTreeVariant(tileX, tileY, random.nextInt(4));
+            map.setTreeTint(tileX, tileY, random.nextInt(5) - 2);
+        }
+        rebuildMapLayers();
+        editorDirty = true;
+    }
+
+    private void sampleEditorBrushAtScreen(int screenX, int screenY) {
+        int tileX = clampTile((int) (screenToWorldX(screenX) / map.getTileSize()), map.getWidth());
+        int tileY = clampTile((int) (screenToWorldY(screenY) / map.getTileSize()), map.getHeight());
+        sampleEditorBrush(tileX, tileY);
+    }
+
+    private void sampleEditorBrush(int tileX, int tileY) {
+        if (!map.inBounds(tileX, tileY)) {
+            return;
+        }
+
+        editorGround = map.getGround(tileX, tileY);
+        editorWater = map.getWater(tileX, tileY);
+        editorProp = map.getProp(tileX, tileY);
+        editorBlocked = map.isBlocked(tileX, tileY);
+        editorLaneMask = laneMaskAt(tileX, tileY);
+        editorTool = EditorTool.PAINT;
+        setEditorStatus("Tile sampled", 1.2);
+    }
+
+    private int laneMaskAt(int tileX, int tileY) {
+        int mask = 0;
+        if (map.hasLaneType(tileX, tileY, LaneType.TOP)) {
+            mask |= laneBit(LaneType.TOP);
+        }
+        if (map.hasLaneType(tileX, tileY, LaneType.MID)) {
+            mask |= laneBit(LaneType.MID);
+        }
+        if (map.hasLaneType(tileX, tileY, LaneType.BOT)) {
+            mask |= laneBit(LaneType.BOT);
+        }
+        return mask;
+    }
+
+    private Structure findStructureForEditor(double worldX, double worldY) {
+        Structure best = null;
+        double bestDistance = Double.MAX_VALUE;
+        for (Structure structure : structures) {
+            double dist = distance(worldX, worldY, structure.x, structure.y);
+            if (dist <= structure.radius + 8.0 && dist < bestDistance) {
+                bestDistance = dist;
+                best = structure;
+            }
+        }
+        return best;
+    }
+
+    private void dragEditorStructureToScreen(int screenX, int screenY) {
+        if (editorDraggedStructure == null) {
+            return;
+        }
+        int tileX = clampTile((int) (screenToWorldX(screenX) / map.getTileSize()), map.getWidth());
+        int tileY = clampTile((int) (screenToWorldY(screenY) / map.getTileSize()), map.getHeight());
+        editorDraggedStructure.x = map.tileCenter(tileX);
+        editorDraggedStructure.y = map.tileCenter(tileY);
+        editorDirty = true;
+    }
+
+    private Color groundPreviewColor(GroundElement ground) {
+        return switch (ground.kind()) {
+            case FOREST -> new Color(86, 128, 76);
+            case GRASS -> new Color(102, 146, 86);
+            case GRASS_ALT -> new Color(88, 131, 74);
+            case DIRT -> new Color(125, 103, 74);
+            case LANE -> new Color(96, 87, 78);
+            case HIGH_GROUND -> new Color(126, 160, 102);
+            case BASE -> new Color(126, 118, 108);
+        };
+    }
+
+    private String laneMaskLabel(int mask) {
+        if (mask == 0) {
+            return "none";
+        }
+        List<String> parts = new ArrayList<>();
+        if ((mask & laneBit(LaneType.TOP)) != 0) {
+            parts.add("top");
+        }
+        if ((mask & laneBit(LaneType.MID)) != 0) {
+            parts.add("mid");
+        }
+        if ((mask & laneBit(LaneType.BOT)) != 0) {
+            parts.add("bot");
+        }
+        return String.join("/", parts);
+    }
+
+    private String propPreviewLabel(PropElement prop) {
+        return switch (prop.kind()) {
+            case ROCK -> "R";
+            case BUSH -> "B";
+            case STUMP -> "S";
+            case PEBBLES -> "P";
+        };
+    }
+
+    private Color brighten(Color color, int delta) {
+        return new Color(
+                Math.min(255, color.getRed() + delta),
+                Math.min(255, color.getGreen() + delta),
+                Math.min(255, color.getBlue() + delta),
+                color.getAlpha()
+        );
     }
 
     private int viewportWidth() {
@@ -2436,6 +2905,10 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
         drawHeroes(g2);
         drawHeroOverheadHud(g2);
         hudRenderer.draw(g2, buildHudModel());
+        if (editorMode) {
+            drawEditorWorldOverlay(g2);
+            drawEditorOverlay(g2);
+        }
     }
 
     private void drawMap(Graphics2D g2) {
@@ -3126,18 +3599,54 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
 
     @Override
     public void keyPressed(KeyEvent e) {
+        if (e.getKeyCode() == KeyEvent.VK_TAB) {
+            toggleEditorMode();
+            return;
+        }
+        if (editorMode && isEditorSaveShortcut(e)) {
+            saveEditedMap();
+            return;
+        }
+
         switch (e.getKeyCode()) {
-            case KeyEvent.VK_ALT -> showAttackRanges = true;
+            case KeyEvent.VK_ALT -> {
+                if (!editorMode) {
+                    showAttackRanges = true;
+                }
+            }
             case KeyEvent.VK_UP -> cameraUp = true;
             case KeyEvent.VK_DOWN -> cameraDown = true;
             case KeyEvent.VK_LEFT -> cameraLeft = true;
             case KeyEvent.VK_RIGHT -> cameraRight = true;
-            case KeyEvent.VK_1 -> switchWeapon(WeaponType.STONE);
-            case KeyEvent.VK_2 -> switchWeapon(WeaponType.BOW);
-            case KeyEvent.VK_3 -> switchWeapon(WeaponType.SWORD);
-            case KeyEvent.VK_Q -> triggerAbility(AbilitySlot.PRIMARY);
-            case KeyEvent.VK_E -> triggerAbility(AbilitySlot.SECONDARY);
+            case KeyEvent.VK_1 -> {
+                if (!editorMode) {
+                    switchWeapon(WeaponType.STONE);
+                }
+            }
+            case KeyEvent.VK_2 -> {
+                if (!editorMode) {
+                    switchWeapon(WeaponType.BOW);
+                }
+            }
+            case KeyEvent.VK_3 -> {
+                if (!editorMode) {
+                    switchWeapon(WeaponType.SWORD);
+                }
+            }
+            case KeyEvent.VK_Q -> {
+                if (!editorMode) {
+                    triggerAbility(AbilitySlot.PRIMARY);
+                }
+            }
+            case KeyEvent.VK_E -> {
+                if (!editorMode) {
+                    triggerAbility(AbilitySlot.SECONDARY);
+                }
+            }
             case KeyEvent.VK_R -> {
+                if (editorMode) {
+                    return;
+                }
                 if (gameOver) {
                     resetGame();
                 } else {
@@ -3166,6 +3675,10 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
     public void mouseDragged(MouseEvent e) {
         if (miniMapDragging) {
             centerCameraOnMiniMapPoint(e.getX(), e.getY());
+        } else if (editorMode && editorDraggedStructure != null) {
+            dragEditorStructureToScreen(e.getX(), e.getY());
+        } else if (editorMode && editorPainting && !isInsideEditorPanel(e.getX(), e.getY()) && !isInsideMiniMap(e.getX(), e.getY())) {
+            applyEditorBrushAtScreen(e.getX(), e.getY());
         } else if (middleMouseDragging) {
             int deltaX = e.getX() - dragLastMouseX;
             int deltaY = e.getY() - dragLastMouseY;
@@ -3191,9 +3704,47 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
     public void mousePressed(MouseEvent e) {
         mouseMoved(e);
 
+        if (editorMode) {
+            if (isInsideEditorPanel(e.getX(), e.getY())) {
+                if (e.getButton() == MouseEvent.BUTTON1) {
+                    handleEditorPanelClick(e.getX(), e.getY());
+                }
+                return;
+            }
+            if (isMiniMapCameraButton(e.getButton()) && isInsideMiniMap(e.getX(), e.getY())) {
+                miniMapDragging = true;
+                centerCameraOnMiniMapPoint(e.getX(), e.getY());
+                return;
+            }
+            if (e.getButton() == MouseEvent.BUTTON1) {
+                if (editorTool == EditorTool.MOVE_STRUCTURE) {
+                    editorDraggedStructure = findStructureForEditor(screenToWorldX(e.getX()), screenToWorldY(e.getY()));
+                    if (editorDraggedStructure != null) {
+                        dragEditorStructureToScreen(e.getX(), e.getY());
+                    }
+                } else {
+                    editorPainting = true;
+                    applyEditorBrushAtScreen(e.getX(), e.getY());
+                }
+                return;
+            }
+            if (e.getButton() == MouseEvent.BUTTON3) {
+                sampleEditorBrushAtScreen(e.getX(), e.getY());
+                return;
+            }
+            if (e.getButton() == MouseEvent.BUTTON2) {
+                middleMouseDragging = true;
+                dragLastMouseX = e.getX();
+                dragLastMouseY = e.getY();
+                return;
+            }
+            return;
+        }
+
         if (isMiniMapCameraButton(e.getButton()) && isInsideMiniMap(e.getX(), e.getY())) {
             miniMapDragging = true;
             centerCameraOnMiniMapPoint(e.getX(), e.getY());
+            return;
         } else if (e.getButton() == MouseEvent.BUTTON3) {
             double worldX = screenToWorldX(e.getX());
             double worldY = screenToWorldY(e.getY());
@@ -3216,6 +3767,10 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
         if (isMiniMapCameraButton(e.getButton())) {
             miniMapDragging = false;
         }
+        if (e.getButton() == MouseEvent.BUTTON1) {
+            editorPainting = false;
+            editorDraggedStructure = null;
+        }
         if (e.getButton() == MouseEvent.BUTTON2) {
             middleMouseDragging = false;
         }
@@ -3231,6 +3786,9 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
     public void mouseExited(MouseEvent e) {
         mouseInsideWindow = false;
         miniMapDragging = false;
+        editorPainting = false;
+        editorDraggedStructure = null;
+        middleMouseDragging = false;
     }
 
     @Override
@@ -3259,6 +3817,28 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
     }
 
     private record CreepLaneProgress(Creep creep, LaneSample sample) {
+    }
+
+    private enum EditorTool {
+        PAINT,
+        MOVE_STRUCTURE
+    }
+
+    private record EditorLabel(String text, int x, int y) {
+    }
+
+    private record EditorButton(String id,
+                                Rectangle bounds,
+                                String label,
+                                boolean selected,
+                                Color fill,
+                                Color text) {
+    }
+
+    private record EditorUi(Rectangle panelBounds,
+                            Rectangle previewBounds,
+                            List<EditorLabel> labels,
+                            List<EditorButton> buttons) {
     }
 
     private record PathNode(int tileX, int tileY, double priority) {
