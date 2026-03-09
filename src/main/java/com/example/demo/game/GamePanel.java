@@ -15,6 +15,7 @@ import com.example.demo.game.model.HeroAbility;
 import com.example.demo.game.model.LaneCreepType;
 import com.example.demo.game.model.LaneType;
 import com.example.demo.game.model.Player;
+import com.example.demo.game.model.ProjectileType;
 import com.example.demo.game.model.Structure;
 import com.example.demo.game.model.StructureType;
 import com.example.demo.game.model.Team;
@@ -117,6 +118,9 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
     private static final double STRUCTURE_ATTACK_ANIMATION_DURATION = 0.42;
     private static final double STRUCTURE_PROJECTILE_SPEED = PLAYER_MOVE_SPEED * 1.1;
     private static final double STRUCTURE_PROJECTILE_LIFETIME = 24.0;
+    private static final double STONE_PROJECTILE_SPEED_MULTIPLIER = 1.15;
+    private static final double ARROW_PROJECTILE_SPEED_MULTIPLIER = 1.5;
+    private static final double PROJECTILE_IMPACT_DURATION = 0.24;
     private static final double UNIT_DEATH_DISSOLVE_DURATION = 0.62;
     private static final double PLAYER_DAMAGE_BAR_SEGMENT_DURATION = 1.0;
     private static final double CAMERA_MOVE_SPEED = 240.0;
@@ -149,6 +153,7 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
     private final Team heroTeam = Team.LIGHT;
 
     private final List<Bullet> bullets = new ArrayList<>();
+    private final List<ProjectileImpact> projectileImpacts = new ArrayList<>();
     private final List<ExperienceOrb> experienceOrbs = new ArrayList<>();
     private final List<ClickMarker> clickMarkers = new ArrayList<>();
     private final List<Creep> laneCreeps = new ArrayList<>();
@@ -244,6 +249,7 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
         regenerateMap();
 
         bullets.clear();
+        projectileImpacts.clear();
         experienceOrbs.clear();
         clickMarkers.clear();
         laneCreeps.clear();
@@ -586,6 +592,7 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
         updatePlayerAnimation(dt, moved);
         audio.updatePlayerMovement(dt, moved, player.hp > 0 && !gameOver && player.attackAnimationTimer <= 0.0);
         updateBullets(dt);
+        updateProjectileImpacts(dt);
         updateLaneCreeps(dt);
         updateNeutralCreeps(dt);
         resolveUnitCollisions();
@@ -825,11 +832,38 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
 
     private double playerWeaponReach() {
         if (currentWeapon.projectile()) {
-            return currentWeapon.projectileSpeed() * currentWeapon.projectileLife()
-                    * ATTACK_RANGE_BALANCE_SCALE
-                    + currentWeapon.projectileRadius();
+            return heroProjectileSpeed(currentWeapon) * heroProjectileLife(currentWeapon) + currentWeapon.projectileRadius();
         }
         return currentWeapon.meleeRange() * ATTACK_RANGE_BALANCE_SCALE;
+    }
+
+    private double heroProjectileSpeed(WeaponType weapon) {
+        return switch (weapon) {
+            case STONE -> STRUCTURE_PROJECTILE_SPEED * STONE_PROJECTILE_SPEED_MULTIPLIER;
+            case BOW -> STRUCTURE_PROJECTILE_SPEED * ARROW_PROJECTILE_SPEED_MULTIPLIER;
+            case SWORD -> 0.0;
+        };
+    }
+
+    private double heroProjectileLife(WeaponType weapon) {
+        double speed = heroProjectileSpeed(weapon);
+        if (speed <= 0.0001) {
+            return weapon.projectileLife();
+        }
+        double reach = weapon.projectileSpeed() * weapon.projectileLife() * ATTACK_RANGE_BALANCE_SCALE;
+        return Math.max(0.18, reach / speed);
+    }
+
+    private ProjectileType heroProjectileType(WeaponType weapon) {
+        return weapon == WeaponType.BOW ? ProjectileType.ARROW : ProjectileType.STONE;
+    }
+
+    private int heroProjectileGlowColor(WeaponType weapon) {
+        return switch (weapon) {
+            case STONE -> 0x667B654D;
+            case BOW -> 0x80F0D9A4;
+            case SWORD -> 0x00000000;
+        };
     }
 
     private int heroWeaponDamage(Player hero, WeaponType weapon) {
@@ -1058,14 +1092,19 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
         Bullet bullet = new Bullet();
         bullet.x = player.x + dx * (player.radius + 9);
         bullet.y = player.y + dy * (player.radius + 9);
-        bullet.vx = dx * weapon.projectileSpeed();
-        bullet.vy = dy * weapon.projectileSpeed();
+        double speed = heroProjectileSpeed(weapon);
+        bullet.vx = dx * speed;
+        bullet.vy = dy * speed;
         bullet.radius = weapon.projectileRadius();
-        bullet.life = weapon.projectileLife() * ATTACK_RANGE_BALANCE_SCALE;
+        bullet.life = heroProjectileLife(weapon);
+        bullet.maxLife = bullet.life;
         bullet.damage = heroWeaponDamage(player, weapon);
         bullet.colorArgb = weapon.projectileColorArgb();
+        bullet.glowColorArgb = heroProjectileGlowColor(weapon);
         bullet.target = target;
         bullet.ownerTeam = player.team;
+        bullet.projectileType = heroProjectileType(weapon);
+        bullet.terrainCollision = false;
         bullets.add(bullet);
     }
 
@@ -1229,6 +1268,7 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
         double hitDistance = bullet.radius + bullet.target.getRadius();
         if (distanceToTarget <= hitDistance) {
             applyBulletHit(bullet, bullet.target);
+            spawnProjectileImpact(bullet, bullet.target.getX(), bullet.target.getY());
             playProjectileImpactSound(bullet.target.getX(), bullet.target.getY());
             return true;
         }
@@ -1243,6 +1283,7 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
             bullet.x = bullet.target.getX() - dirX * hitDistance;
             bullet.y = bullet.target.getY() - dirY * hitDistance;
             applyBulletHit(bullet, bullet.target);
+            spawnProjectileImpact(bullet, bullet.target.getX(), bullet.target.getY());
             playProjectileImpactSound(bullet.target.getX(), bullet.target.getY());
             return true;
         }
@@ -1253,6 +1294,7 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
         boolean hitTerrain = bullet.terrainCollision && map.isBlockedPixel(bullet.x, bullet.y);
         if (bullet.life <= 0.0 || hitTerrain) {
             if (hitTerrain) {
+                spawnProjectileImpact(bullet, bullet.x, bullet.y);
                 playProjectileImpactSound(bullet.x, bullet.y);
             }
             return true;
@@ -1263,6 +1305,9 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
     private boolean isValidBulletTarget(Bullet bullet, CombatEntity target) {
         if (bullet.structureProjectile) {
             return isValidStructureProjectileTarget(bullet, target);
+        }
+        if (bullet.creepProjectile) {
+            return isValidLaneProjectileTarget(bullet, target);
         }
         return isValidPlayerProjectileTarget(target);
     }
@@ -1279,7 +1324,18 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
             applyStructureProjectileHit(target, bullet.damage);
             return;
         }
+        if (bullet.creepProjectile) {
+            applyLaneProjectileHit(target, bullet.damage);
+            return;
+        }
         applyPlayerProjectileHit(target, bullet.damage);
+    }
+
+    private boolean isValidLaneProjectileTarget(Bullet bullet, CombatEntity target) {
+        return target != null
+                && target.isAlive()
+                && bullet.ownerTeam != null
+                && target.getTeam() == bullet.ownerTeam.opposite();
     }
 
     private boolean isValidPlayerProjectileTarget(CombatEntity target) {
@@ -1291,6 +1347,16 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
             damageHero(hero, damage);
         } else if (target instanceof Creep creep) {
             damageCreepByHero(creep, damage);
+        } else if (target instanceof Structure structure) {
+            damageStructure(structure, damage);
+        }
+    }
+
+    private void applyLaneProjectileHit(CombatEntity target, int damage) {
+        if (target instanceof Player hero) {
+            damageHero(hero, damage);
+        } else if (target instanceof Creep creep) {
+            damageCreepByCreep(creep, damage);
         } else if (target instanceof Structure structure) {
             damageStructure(structure, damage);
         }
@@ -1370,7 +1436,11 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
         }
 
         if (creep.attackTimer <= 0.0) {
-            damageCreepByCreep(target, creep.damage);
+            if (usesLaneProjectile(creep)) {
+                fireLaneProjectile(creep, target, creep.damage);
+            } else {
+                damageCreepByCreep(target, creep.damage);
+            }
             creep.attackTimer = creep.attackCooldown;
             triggerUnitAttackAnimation(creep, target.x, target.y);
         }
@@ -1400,7 +1470,11 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
         }
 
         if (creep.attackTimer <= 0.0) {
-            damageStructure(target, damageAgainstStructure(creep));
+            if (usesLaneProjectile(creep)) {
+                fireLaneProjectile(creep, target, damageAgainstStructure(creep));
+            } else {
+                damageStructure(target, damageAgainstStructure(creep));
+            }
             creep.attackTimer = creep.attackCooldown;
             triggerUnitAttackAnimation(creep, target.x, target.y);
         }
@@ -1422,7 +1496,11 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
         }
 
         if (creep.attackTimer <= 0.0) {
-            damageHero(hero, creep.damage);
+            if (usesLaneProjectile(creep)) {
+                fireLaneProjectile(creep, hero, creep.damage);
+            } else {
+                damageHero(hero, creep.damage);
+            }
             creep.attackTimer = creep.attackCooldown;
             triggerUnitAttackAnimation(creep, hero.x, hero.y);
         }
@@ -1430,6 +1508,76 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
 
     private void engageHeroTarget(Creep creep, Player hero, double dt) {
         engageHeroTarget(creep, hero, null, dt);
+    }
+
+    private boolean usesLaneProjectile(Creep creep) {
+        return creep.laneType == LaneCreepType.RANGED || creep.laneType == LaneCreepType.CATAPULT;
+    }
+
+    private void fireLaneProjectile(Creep creep, CombatEntity target, int damage) {
+        if (target == null) {
+            return;
+        }
+
+        double dx = target.getX() - creep.x;
+        double dy = target.getY() - creep.y;
+        double len = Math.hypot(dx, dy);
+        if (len < 0.001) {
+            dx = 0.0;
+            dy = -1.0;
+            len = 1.0;
+        }
+
+        double dirX = dx / len;
+        double dirY = dy / len;
+        double speed = laneProjectileSpeed(creep);
+
+        Bullet bullet = new Bullet();
+        bullet.x = creep.x + dirX * creep.radius * (creep.laneType == LaneCreepType.CATAPULT ? 0.7 : 0.82);
+        bullet.y = creep.y + dirY * creep.radius * (creep.laneType == LaneCreepType.CATAPULT ? 0.7 : 0.82);
+        bullet.vx = dirX * speed;
+        bullet.vy = dirY * speed;
+        bullet.radius = creep.laneType == LaneCreepType.CATAPULT ? 4.4 : 3.8;
+        bullet.life = laneProjectileLifetime(creep, speed);
+        bullet.maxLife = bullet.life;
+        bullet.damage = damage;
+        bullet.colorArgb = laneProjectileColor(creep);
+        bullet.glowColorArgb = laneProjectileGlowColor(creep);
+        bullet.target = target;
+        bullet.ownerTeam = creep.team;
+        bullet.projectileType = creep.laneType == LaneCreepType.CATAPULT
+                ? ProjectileType.CATAPULT_ROCK
+                : ProjectileType.MAGIC_ORB;
+        bullet.creepProjectile = true;
+        bullet.terrainCollision = false;
+        bullets.add(bullet);
+    }
+
+    private double laneProjectileSpeed(Creep creep) {
+        return creep.laneType == LaneCreepType.CATAPULT
+                ? STRUCTURE_PROJECTILE_SPEED * STONE_PROJECTILE_SPEED_MULTIPLIER
+                : STRUCTURE_PROJECTILE_SPEED * ARROW_PROJECTILE_SPEED_MULTIPLIER;
+    }
+
+    private double laneProjectileLifetime(Creep creep, double speed) {
+        if (speed <= 0.0001) {
+            return 1.0;
+        }
+        return Math.max(0.5, (creep.attackRange + GameConfig.TILE * 1.25) / speed);
+    }
+
+    private int laneProjectileColor(Creep creep) {
+        if (creep.laneType == LaneCreepType.CATAPULT) {
+            return creep.team == Team.LIGHT ? 0xFFC6B38F : 0xFFAA795D;
+        }
+        return creep.team == Team.LIGHT ? 0xFFFFE6B2 : 0xFFFFB176;
+    }
+
+    private int laneProjectileGlowColor(Creep creep) {
+        if (creep.laneType == LaneCreepType.CATAPULT) {
+            return creep.team == Team.LIGHT ? 0x668F7A5A : 0x66754E3C;
+        }
+        return creep.team == Team.LIGHT ? 0x88FFD98C : 0x88FF9B5C;
     }
 
     private void moveAlongLane(Creep creep, LaneGuidance guidance, double dt) {
@@ -2075,11 +2223,13 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
         bullet.vy = dirY * STRUCTURE_PROJECTILE_SPEED;
         bullet.radius = structure.type == StructureType.THRONE ? 5.8 : 4.8;
         bullet.life = STRUCTURE_PROJECTILE_LIFETIME;
+        bullet.maxLife = bullet.life;
         bullet.damage = structure.damage;
         bullet.colorArgb = structure.team == Team.LIGHT ? 0xFFD9F5FF : 0xFFFFB0A4;
         bullet.glowColorArgb = structure.team == Team.LIGHT ? 0x884CCBFF : 0x88FF5A5A;
         bullet.target = target;
         bullet.ownerTeam = structure.team;
+        bullet.projectileType = ProjectileType.STRUCTURE_ORB;
         bullet.structureProjectile = true;
         bullet.terrainCollision = false;
         bullets.add(bullet);
@@ -2431,6 +2581,37 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
                 it.remove();
             }
         }
+    }
+
+    private void updateProjectileImpacts(double dt) {
+        Iterator<ProjectileImpact> it = projectileImpacts.iterator();
+        while (it.hasNext()) {
+            ProjectileImpact impact = it.next();
+            impact.remainingTime -= dt;
+            if (impact.remainingTime <= 0.0) {
+                it.remove();
+            }
+        }
+    }
+
+    private void spawnProjectileImpact(Bullet bullet, double x, double y) {
+        LaneCreepType impactType = switch (bullet.projectileType) {
+            case MAGIC_ORB -> LaneCreepType.RANGED;
+            case CATAPULT_ROCK -> LaneCreepType.CATAPULT;
+            default -> null;
+        };
+        if (impactType == null) {
+            return;
+        }
+
+        ProjectileImpact impact = new ProjectileImpact();
+        impact.x = x;
+        impact.y = y;
+        impact.team = bullet.ownerTeam == null ? Team.NEUTRAL : bullet.ownerTeam;
+        impact.type = impactType;
+        impact.duration = PROJECTILE_IMPACT_DURATION;
+        impact.remainingTime = impact.duration;
+        projectileImpacts.add(impact);
     }
 
     private void gainExperience(int value) {
@@ -3841,11 +4022,12 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
                 1.0
         ));
         double innerFade = 1.0 - smoothstep(clamp(innerElapsed / CLICK_MARKER_INNER_FADE_DURATION, 0.0, 1.0));
+        double innerTipDistance = lerp(scaledClickSize(10.0), scaledClickSize(2.8), innerTravel);
         drawClickArrowWave(
                 g2,
                 sx,
                 sy,
-                lerp(scaledClickSize(10.0), scaledClickSize(2.8), innerTravel),
+                innerTipDistance,
                 scaledClickSize(7.0),
                 scaledClickSize(4.2),
                 innerCore,
@@ -3853,11 +4035,9 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
                 visibilityAlpha(210, innerFade)
         );
 
-        double centerProgress = smoothstep(clamp(elapsed / CLICK_MARKER_LIFETIME, 0.0, 1.0));
-        double centerFade = 1.0 - smoothstep(clamp(elapsed / CLICK_MARKER_LIFETIME, 0.0, 1.0));
-        int circleRadius = (int) Math.round(lerp(scaledClickSize(4.8), scaledClickSize(2.0), centerProgress));
-        int circleAlpha = visibilityAlpha(170, centerFade);
-        int glowRadius = circleRadius + scaledClickSize(1.6);
+        int circleRadius = Math.max(scaledClickSize(2.4), (int) Math.round(innerTipDistance));
+        int circleAlpha = visibilityAlpha(170, innerFade);
+        int glowRadius = circleRadius + scaledClickSize(1.4);
         Stroke oldStroke = g2.getStroke();
         g2.setColor(new Color(glow.getRed(), glow.getGreen(), glow.getBlue(), Math.max(0, circleAlpha / 3)));
         g2.fillOval(sx - glowRadius, sy - glowRadius, glowRadius * 2, glowRadius * 2);
@@ -4400,20 +4580,17 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
                                              double progress) {
         int startX = (int) Math.round(sx + dirX * radius * 0.82);
         int startY = (int) Math.round(sy + dirY * radius * 0.82);
-        double travel = smoothstep(clamp(progress / 0.78, 0.0, 1.0));
-        int boltX = (int) Math.round(startX + (targetX - startX) * travel);
-        int boltY = (int) Math.round(startY + (targetY - startY) * travel);
-
-        if (travel < 0.995) {
-            int glowR = Math.max(4, (int) Math.round((3.6 + (1.0 - progress) * 2.4) * ZOOM));
-            g2.setColor(new Color(246, 222, 150, 90));
-            g2.fillOval(boltX - glowR - 3, boltY - glowR - 3, (glowR + 3) * 2, (glowR + 3) * 2);
+        double fade = 1.0 - smoothstep(clamp(progress / 0.4, 0.0, 1.0));
+        if (fade > 0.0) {
+            int glowR = Math.max(4, (int) Math.round((4.8 + (1.0 - progress) * 3.4) * ZOOM));
+            g2.setColor(new Color(246, 222, 150, Math.max(0, (int) Math.round(84 * fade))));
+            g2.fillOval(startX - glowR - 4, startY - glowR - 4, (glowR + 4) * 2, (glowR + 4) * 2);
             g2.setColor(creep.team == Team.LIGHT
-                    ? new Color(255, 235, 182, 235)
-                    : new Color(255, 176, 112, 228));
-            g2.fillOval(boltX - glowR, boltY - glowR, glowR * 2, glowR * 2);
-            g2.setColor(new Color(255, 250, 232, 230));
-            g2.fillOval(boltX - Math.max(2, glowR / 2), boltY - Math.max(2, glowR / 2), Math.max(4, glowR), Math.max(4, glowR));
+                    ? new Color(255, 235, 182, Math.max(0, (int) Math.round(220 * fade)))
+                    : new Color(255, 176, 112, Math.max(0, (int) Math.round(214 * fade))));
+            g2.fillOval(startX - glowR, startY - glowR, glowR * 2, glowR * 2);
+            g2.setColor(new Color(255, 250, 232, Math.max(0, (int) Math.round(228 * fade))));
+            g2.fillOval(startX - Math.max(2, glowR / 2), startY - Math.max(2, glowR / 2), Math.max(4, glowR), Math.max(4, glowR));
         }
     }
 
@@ -4429,19 +4606,15 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
                                                double progress) {
         int startX = (int) Math.round(sx + dirX * radius * 0.7);
         int startY = (int) Math.round(sy + dirY * radius * 0.7);
-        double travel = smoothstep(clamp(progress / 0.82, 0.0, 1.0));
-        double arcHeight = Math.sin(travel * Math.PI) * 12.0 * ZOOM;
-        int stoneX = (int) Math.round(startX + (targetX - startX) * travel);
-        int stoneY = (int) Math.round(startY + (targetY - startY) * travel - arcHeight);
-
-        if (travel < 0.995) {
-            int stoneR = Math.max(4, (int) Math.round(4.2 * ZOOM));
-            g2.setColor(new Color(74, 60, 46, 80));
-            g2.fillOval(stoneX - stoneR - 1, stoneY - stoneR + 2, (stoneR + 1) * 2, (stoneR + 1) * 2);
-            g2.setColor(new Color(104, 92, 78, 230));
-            g2.fillOval(stoneX - stoneR, stoneY - stoneR, stoneR * 2, stoneR * 2);
-            g2.setColor(new Color(158, 140, 118, 210));
-            g2.fillOval(stoneX - stoneR / 2, stoneY - stoneR / 2 - 1, Math.max(3, stoneR), Math.max(3, stoneR));
+        double fade = 1.0 - smoothstep(clamp(progress / 0.42, 0.0, 1.0));
+        if (fade > 0.0) {
+            int stoneR = Math.max(4, (int) Math.round((4.0 + (1.0 - progress) * 1.1) * ZOOM));
+            g2.setColor(new Color(74, 60, 46, Math.max(0, (int) Math.round(70 * fade))));
+            g2.fillOval(startX - stoneR - 2, startY - stoneR + 2, (stoneR + 2) * 2, (stoneR + 2) * 2);
+            g2.setColor(new Color(104, 92, 78, Math.max(0, (int) Math.round(224 * fade))));
+            g2.fillOval(startX - stoneR, startY - stoneR, stoneR * 2, stoneR * 2);
+            g2.setColor(new Color(158, 140, 118, Math.max(0, (int) Math.round(205 * fade))));
+            g2.fillOval(startX - stoneR / 2, startY - stoneR / 2 - 1, Math.max(3, stoneR), Math.max(3, stoneR));
         }
     }
 
@@ -5134,27 +5307,42 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
         private boolean attack;
     }
 
+    private static final class ProjectileImpact {
+        private double x;
+        private double y;
+        private double remainingTime;
+        private double duration;
+        private Team team;
+        private LaneCreepType type;
+    }
+
     private void drawAttackImpactOverlay(Graphics2D g2) {
         for (Creep creep : laneCreeps) {
             drawLaneCreepImpactOverlay(g2, creep);
         }
+        for (ProjectileImpact impact : projectileImpacts) {
+            drawProjectileImpact(g2, impact);
+        }
     }
 
     private void drawLaneCreepImpactOverlay(Graphics2D g2, Creep creep) {
-        if (creep.hp <= 0 || creep.role != CreepRole.LANE || creep.attackAnimationTimer <= 0.0) {
+        if (creep.hp <= 0
+                || creep.role != CreepRole.LANE
+                || creep.attackAnimationTimer <= 0.0
+                || creep.laneType == LaneCreepType.RANGED
+                || creep.laneType == LaneCreepType.CATAPULT) {
             return;
         }
+    }
 
-        double progress = 1.0 - clamp(creep.attackAnimationTimer / UNIT_ATTACK_ANIMATION_DURATION, 0.0, 1.0);
-        int targetX = worldToScreenX(creep.attackVisualTargetX);
-        int targetY = worldToScreenY(creep.attackVisualTargetY);
-
-        if (creep.laneType == LaneCreepType.RANGED && progress >= 0.56) {
-            double burst = clamp((progress - 0.56) / 0.44, 0.0, 1.0);
-            drawMagicImpactExplosion(g2, targetX, targetY, burst, creep.team);
-        } else if (creep.laneType == LaneCreepType.CATAPULT && progress >= 0.6) {
-            double burst = clamp((progress - 0.6) / 0.4, 0.0, 1.0);
-            drawCatapultImpactExplosion(g2, targetX, targetY, burst, creep.team);
+    private void drawProjectileImpact(Graphics2D g2, ProjectileImpact impact) {
+        double progress = 1.0 - clamp(impact.remainingTime / impact.duration, 0.0, 1.0);
+        int centerX = worldToScreenX(impact.x);
+        int centerY = worldToScreenY(impact.y);
+        if (impact.type == LaneCreepType.CATAPULT) {
+            drawCatapultImpactExplosion(g2, centerX, centerY, progress, impact.team);
+        } else {
+            drawMagicImpactExplosion(g2, centerX, centerY, progress, impact.team);
         }
     }
 
@@ -5163,19 +5351,58 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
             int bx = worldToScreenX(bullet.x);
             int by = worldToScreenY(bullet.y);
             int r = (int) Math.round(bullet.radius * ZOOM);
-            if (bullet.glowColorArgb != 0) {
-                int glowR = r + Math.max(3, (int) Math.round(3.0 * ZOOM));
-                g2.setColor(new Color(bullet.glowColorArgb, true));
-                g2.fillOval(bx - glowR, by - glowR, glowR * 2, glowR * 2);
-            }
-            g2.setColor(new Color(bullet.colorArgb, true));
-            g2.fillOval(bx - r, by - r, r * 2, r * 2);
-            if (bullet.structureProjectile) {
-                int shineR = Math.max(2, r / 2);
-                g2.setColor(new Color(255, 255, 255, 210));
-                g2.fillOval(bx - shineR + 1, by - shineR + 1, shineR * 2, shineR * 2);
-            }
+            drawJellyProjectile(g2, bullet, bx, by, r);
         }
+    }
+
+    private void drawJellyProjectile(Graphics2D g2, Bullet bullet, int bx, int by, int radius) {
+        double angle = Math.atan2(bullet.vy, bullet.vx);
+        double progress = bullet.maxLife <= 0.0001 ? 0.0 : 1.0 - clamp(bullet.life / bullet.maxLife, 0.0, 1.0);
+        double pulse = Math.sin(progress * Math.PI * 6.0 + bullet.life * 11.0) * 0.12;
+        double stretch = projectileStretch(bullet.projectileType) + pulse;
+        double squash = Math.max(0.62, 0.9 - pulse * 0.45);
+
+        int bodyW = Math.max(radius * 2, (int) Math.round(radius * 2.0 * stretch));
+        int bodyH = Math.max(radius * 2 - 1, (int) Math.round(radius * 2.0 * squash));
+        int tailW = Math.max(radius * 2 - 1, (int) Math.round(bodyW * 0.72));
+        int tailH = Math.max(radius * 2 - 1, (int) Math.round(bodyH * 0.88));
+        int glowW = bodyW + Math.max(6, (int) Math.round(4.0 * ZOOM));
+        int glowH = bodyH + Math.max(5, (int) Math.round(3.0 * ZOOM));
+
+        Graphics2D projectileGraphics = (Graphics2D) g2.create();
+        projectileGraphics.translate(bx, by);
+        projectileGraphics.rotate(angle);
+
+        if (bullet.glowColorArgb != 0) {
+            projectileGraphics.setColor(new Color(bullet.glowColorArgb, true));
+            projectileGraphics.fillOval(-glowW / 2, -glowH / 2, glowW, glowH);
+        }
+
+        projectileGraphics.setColor(new Color(bullet.colorArgb, true));
+        projectileGraphics.fillOval(-tailW / 2 - radius / 3, -tailH / 2, tailW, tailH);
+        projectileGraphics.fillOval(-bodyW / 2, -bodyH / 2, bodyW, bodyH);
+
+        int highlightW = Math.max(3, (int) Math.round(bodyW * 0.34));
+        int highlightH = Math.max(3, (int) Math.round(bodyH * 0.42));
+        projectileGraphics.setColor(new Color(255, 255, 255, 198));
+        projectileGraphics.fillOval(bodyW / 6, -highlightH / 2 - 1, highlightW, highlightH);
+
+        if (bullet.projectileType == ProjectileType.CATAPULT_ROCK || bullet.projectileType == ProjectileType.STONE) {
+            projectileGraphics.setColor(new Color(96, 84, 70, 90));
+            projectileGraphics.setStroke(new BasicStroke(1.1f));
+            projectileGraphics.drawOval(-bodyW / 5, -bodyH / 3, Math.max(3, bodyW / 3), Math.max(3, bodyH / 2));
+        }
+
+        projectileGraphics.dispose();
+    }
+
+    private double projectileStretch(ProjectileType projectileType) {
+        return switch (projectileType) {
+            case ARROW -> 1.55;
+            case MAGIC_ORB, STRUCTURE_ORB -> 1.38;
+            case STONE -> 1.22;
+            case CATAPULT_ROCK -> 1.12;
+        };
     }
 
     private void drawHealthBar(Graphics2D g2,
