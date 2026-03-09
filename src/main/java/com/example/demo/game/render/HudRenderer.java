@@ -16,8 +16,7 @@ import java.awt.image.BufferedImage;
 import java.util.List;
 
 public final class HudRenderer {
-    private static final int MINIMAP_W = 252;
-    private static final int MINIMAP_H = 168;
+    private static final int MINIMAP_SIZE = 220;
     private static final int MINIMAP_PAD = 8;
 
     public record Model(int panelWidth,
@@ -50,11 +49,10 @@ public final class HudRenderer {
             return null;
         }
 
-        int miniW = Math.max(1, MINIMAP_W - MINIMAP_PAD * 2);
-        int miniH = Math.max(1, MINIMAP_H - MINIMAP_PAD * 2);
-        BufferedImage mini = new BufferedImage(miniW, miniH, BufferedImage.TYPE_INT_ARGB);
+        int miniSize = Math.max(1, MINIMAP_SIZE - MINIMAP_PAD * 2);
+        BufferedImage mini = new BufferedImage(miniSize, miniSize, BufferedImage.TYPE_INT_ARGB);
         Graphics2D g2 = mini.createGraphics();
-        g2.drawImage(mapLayer, 0, 0, miniW, miniH, null);
+        g2.drawImage(mapLayer, 0, 0, miniSize, miniSize, null);
         g2.dispose();
         return mini;
     }
@@ -147,17 +145,17 @@ public final class HudRenderer {
     }
 
     private void drawMiniMap(Graphics2D g2, Model model) {
-        int panelX = model.panelWidth() - MINIMAP_W - 16;
+        int panelX = model.panelWidth() - MINIMAP_SIZE - 16;
         int panelY = 16;
         int mapX = panelX + MINIMAP_PAD;
         int mapY = panelY + MINIMAP_PAD;
-        int mapW = MINIMAP_W - MINIMAP_PAD * 2;
-        int mapH = MINIMAP_H - MINIMAP_PAD * 2;
+        int mapW = MINIMAP_SIZE - MINIMAP_PAD * 2;
+        int mapH = MINIMAP_SIZE - MINIMAP_PAD * 2;
 
         g2.setColor(new Color(0, 0, 0, 165));
-        g2.fillRoundRect(panelX, panelY, MINIMAP_W, MINIMAP_H, 10, 10);
+        g2.fillRoundRect(panelX, panelY, MINIMAP_SIZE, MINIMAP_SIZE, 10, 10);
         g2.setColor(new Color(235, 235, 235, 180));
-        g2.drawRoundRect(panelX, panelY, MINIMAP_W, MINIMAP_H, 10, 10);
+        g2.drawRoundRect(panelX, panelY, MINIMAP_SIZE, MINIMAP_SIZE, 10, 10);
 
         if (model.miniMapLayer() != null) {
             g2.drawImage(model.miniMapLayer(), mapX, mapY, mapW, mapH, null);
