@@ -75,7 +75,7 @@ import java.awt.event.MouseListener;
 import java.awt.event.MouseMotionListener;
 
 public class GamePanel extends JPanel implements KeyListener, MouseMotionListener, MouseListener {
-    private static final double ZOOM = 2.0;
+    private static final double ZOOM = 2.0 / 0.7;
     private static final double HERO_RENDER_SCALE = 0.8;
     private static final double HERO_RESPAWN_TIME = 1.0;
     private static final double EXPERIENCE_ORB_LIFETIME = 15.0;
@@ -96,6 +96,8 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
     private static final double CREEP_LANE_LOOKAHEAD = GameConfig.TILE * 1.1;
     private static final double CREEP_SEPARATION_RANGE = STANDARD_UNIT_RADIUS * 3.0;
     private static final double CREEP_STRUCTURE_AVOID_RANGE = GameConfig.TILE * 0.9;
+    private static final double LANE_CREEP_VISION_RADIUS = GameConfig.TILE * 5.0;
+    private static final double LANE_CREEP_TARGET_LOST_DELAY = 2.0;
     private static final double CREEP_TARGET_WEIGHT = 1.35;
     private static final double CREEP_SEPARATION_WEIGHT = 1.65;
     private static final double CREEP_STRUCTURE_AVOID_WEIGHT = 1.3;
@@ -484,6 +486,8 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
         creep.deathRewardsGranted = false;
         creep.deniedByHero = false;
         creep.denyIndicatorTimer = 0.0;
+        creep.laneVisionTarget = null;
+        creep.laneVisionLostTime = 0.0;
         laneCreeps.add(creep);
     }
 
@@ -1398,14 +1402,19 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
 
             LaneGuidance guidance = laneGuidance.get(creep);
             Structure laneObjective = findLaneTargetStructure(creep);
-            if (laneObjective != null && isWithinLaneObjectiveZone(creep, laneObjective)) {
-                Player defendingHero = findLaneHeroTarget(creep, laneObjective);
-                if (defendingHero != null) {
-                    engageHeroTarget(creep, defendingHero, guidance, dt);
-                    updateCreepAnimation(creep, dt);
-                    continue;
-                }
+            CombatEntity visionTarget = updateLaneVisionTarget(creep, laneObjective, dt);
+            if (visionTarget instanceof Player heroTarget) {
+                engageHeroTarget(creep, heroTarget, guidance, dt);
+                updateCreepAnimation(creep, dt);
+                continue;
+            }
+            if (visionTarget instanceof Creep creepTarget) {
+                engageCreepTarget(creep, creepTarget, guidance, dt);
+                updateCreepAnimation(creep, dt);
+                continue;
+            }
 
+            if (laneObjective != null && isWithinLaneObjectiveZone(creep, laneObjective)) {
                 if (laneObjective.type == StructureType.TOWER && !canCommitToTowerAttack(creep, laneObjective)) {
                     moveAlongLane(creep, guidance, dt);
                     updateCreepAnimation(creep, dt);
@@ -1413,13 +1422,6 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
                 }
 
                 engageStructureTarget(creep, laneObjective, guidance, dt);
-                updateCreepAnimation(creep, dt);
-                continue;
-            }
-
-            Creep enemyCreep = findNearestEnemyLaneCreep(creep, laneCreepAggroRadius(creep));
-            if (enemyCreep != null) {
-                engageCreepTarget(creep, enemyCreep, guidance, dt);
                 updateCreepAnimation(creep, dt);
                 continue;
             }
@@ -2347,6 +2349,91 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
         return hero;
     }
 
+    private CombatEntity updateLaneVisionTarget(Creep creep, Structure laneObjective, double dt) {
+        CombatEntity currentTarget = creep.laneVisionTarget;
+        if (!isValidLaneVisionTarget(creep, currentTarget, laneObjective)) {
+            creep.laneVisionTarget = null;
+            creep.laneVisionLostTime = 0.0;
+            currentTarget = null;
+        }
+
+        if (currentTarget != null) {
+            if (isWithinLaneVision(creep, currentTarget)) {
+                creep.laneVisionLostTime = 0.0;
+                return currentTarget;
+            }
+
+            creep.laneVisionLostTime += dt;
+            if (creep.laneVisionLostTime < LANE_CREEP_TARGET_LOST_DELAY) {
+                return currentTarget;
+            }
+
+            creep.laneVisionTarget = null;
+            creep.laneVisionLostTime = 0.0;
+        }
+
+        CombatEntity nextTarget = findNearestVisibleLaneVisionTarget(creep, laneObjective);
+        creep.laneVisionTarget = nextTarget;
+        creep.laneVisionLostTime = 0.0;
+        return nextTarget;
+    }
+
+    private CombatEntity findNearestVisibleLaneVisionTarget(Creep creep, Structure laneObjective) {
+        CombatEntity bestTarget = null;
+        double bestDistance = Double.MAX_VALUE;
+
+        Player heroTarget = findNearestHeroByTeam(creep.x, creep.y, LANE_CREEP_VISION_RADIUS, creep.team.opposite());
+        if (isValidLaneVisionTarget(creep, heroTarget, laneObjective)) {
+            bestTarget = heroTarget;
+            bestDistance = distance(creep.x, creep.y, heroTarget.x, heroTarget.y);
+        }
+
+        for (Creep candidate : laneCreeps) {
+            if (!isValidLaneVisionTarget(creep, candidate, laneObjective)) {
+                continue;
+            }
+
+            double dist = distance(creep.x, creep.y, candidate.x, candidate.y);
+            if (dist <= LANE_CREEP_VISION_RADIUS && dist < bestDistance) {
+                bestDistance = dist;
+                bestTarget = candidate;
+            }
+        }
+
+        return bestTarget;
+    }
+
+    private boolean isValidLaneVisionTarget(Creep creep, CombatEntity target, Structure laneObjective) {
+        if (target == null || !target.isAlive() || target.getTeam() != creep.team.opposite()) {
+            return false;
+        }
+        if (target instanceof Creep targetCreep) {
+            if (targetCreep == creep || targetCreep.role != CreepRole.LANE || targetCreep.lane != creep.lane) {
+                return false;
+            }
+        }
+        return !isLaneTargetBeyondObjective(creep, target, laneObjective);
+    }
+
+    private boolean isWithinLaneVision(Creep creep, CombatEntity target) {
+        return target != null && distance(creep.x, creep.y, target.getX(), target.getY()) <= LANE_CREEP_VISION_RADIUS;
+    }
+
+    private boolean isLaneTargetBeyondObjective(Creep creep, CombatEntity target, Structure laneObjective) {
+        if (laneObjective == null || laneObjective.hp <= 0) {
+            return false;
+        }
+
+        List<Point> path = lanePaths.get(creep.team).get(creep.lane);
+        if (path == null || path.size() < 2) {
+            return false;
+        }
+
+        double targetProgress = sampleLaneProgress(target.getX(), target.getY(), path).progress();
+        double objectiveProgress = sampleLaneProgress(laneObjective.x, laneObjective.y, path).progress();
+        return targetProgress > objectiveProgress + STANDARD_UNIT_RADIUS;
+    }
+
     private double laneCreepAggroRadius(Creep creep) {
         return Math.max(130.0, creep.attackRange + STANDARD_UNIT_RADIUS * 2.0);
     }
@@ -2482,6 +2569,8 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
         creep.attackTimer = 0.0;
         creep.attackAnimationTimer = 0.0;
         creep.aggroedToHero = false;
+        creep.laneVisionTarget = null;
+        creep.laneVisionLostTime = 0.0;
         creep.state = AnimationState.DEAD;
         creep.animPhase = 0.0;
         creep.deathAnimationTimer = UNIT_DEATH_DISSOLVE_DURATION;
