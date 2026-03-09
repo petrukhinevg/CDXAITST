@@ -121,7 +121,11 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
     private static final double CAMERA_MOVE_SPEED = 240.0;
     private static final double CAMERA_EDGE_MOVE_SPEED = 420.0;
     private static final int CAMERA_EDGE_SCROLL_MARGIN = 28;
-    private static final double CLICK_MARKER_LIFETIME = 0.75;
+    private static final double CLICK_MARKER_OUTER_FADE_DURATION = 1.0;
+    private static final double CLICK_MARKER_INNER_FADE_DURATION = 0.45;
+    private static final double CLICK_MARKER_LIFETIME = CLICK_MARKER_OUTER_FADE_DURATION + CLICK_MARKER_INNER_FADE_DURATION;
+    private static final double CLICK_MARKER_SCALE = 0.5;
+    private static final double SELECTED_TARGET_GLOW_SPEED = 5.4;
     private static final double ATTACK_RANGE_BALANCE_SCALE = 1.0 / 1.25;
 
     private final Random random = new Random();
@@ -3490,6 +3494,7 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
             }
             structureGraphics.dispose();
             drawStructureAttackEffect(g2, s, sx, sy, r);
+            drawSelectedStructureHighlight(g2, s, sx, sy, r);
 
             drawHealthBar(g2, sx, sy - r - 12, 54, 7,
                     (double) s.hp / s.maxHp,
@@ -3738,50 +3743,63 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
 
     private void drawClickMarkers(Graphics2D g2) {
         for (ClickMarker marker : clickMarkers) {
-            double progress = 1.0 - marker.lifetime / CLICK_MARKER_LIFETIME;
-            double pulse = Math.sin(progress * Math.PI);
-            int alpha = (int) Math.round(220 * (1.0 - progress));
+            double elapsed = CLICK_MARKER_LIFETIME - marker.lifetime;
+            double progress = elapsed / CLICK_MARKER_LIFETIME;
+            double inward = 1.0 - smoothstep(progress);
+            double outerFade = 1.0 - smoothstep(clamp(elapsed / CLICK_MARKER_OUTER_FADE_DURATION, 0.0, 1.0));
+            double innerPhaseElapsed = Math.max(0.0, elapsed - CLICK_MARKER_OUTER_FADE_DURATION);
+            double innerFade = 1.0 - smoothstep(clamp(innerPhaseElapsed / CLICK_MARKER_INNER_FADE_DURATION, 0.0, 1.0));
             int sx = worldToScreenX(marker.x);
             int sy = worldToScreenY(marker.y);
+            Stroke oldStroke = g2.getStroke();
             if (marker.attack) {
-                int outerRadius = (int) Math.round((10.0 + progress * 22.0) * ZOOM);
-                int innerRadius = (int) Math.round((4.0 + pulse * 5.0) * ZOOM);
-                int spikeGap = (int) Math.round((7.0 + pulse * 3.0) * ZOOM);
-                int spikeLen = (int) Math.round((7.0 + (1.0 - progress) * 4.0) * ZOOM);
+                int outerRadius = scaledClickSize(9.0 + inward * 23.0);
+                int innerRadius = scaledClickSize(3.0 + inward * 9.0);
+                int spikeGap = scaledClickSize(5.0 + inward * 13.0);
+                int spikeLen = scaledClickSize(4.0 + inward * 7.0);
+                int diagRadius = scaledClickSize(2.0 + inward * 6.0);
+                int outerAlpha = visibilityAlpha(76, outerFade);
+                int lineAlpha = visibilityAlpha(220, outerFade);
+                int innerAlpha = visibilityAlpha(210, innerFade);
 
-                g2.setColor(new Color(255, 94, 78, Math.max(0, alpha / 4)));
+                g2.setColor(new Color(255, 94, 78, outerAlpha));
                 g2.fillOval(sx - outerRadius, sy - outerRadius, outerRadius * 2, outerRadius * 2);
 
-                g2.setStroke(new BasicStroke((float) Math.max(2.0, 3.2 * (1.0 - progress))));
-                g2.setColor(new Color(255, 98, 82, Math.max(0, alpha)));
+                g2.setStroke(new BasicStroke((float) Math.max(1.2, 1.5 * CLICK_MARKER_SCALE + 1.5 * (1.0 - progress))));
+                g2.setColor(new Color(255, 98, 82, lineAlpha));
                 g2.drawOval(sx - outerRadius, sy - outerRadius, outerRadius * 2, outerRadius * 2);
 
-                g2.setColor(new Color(255, 214, 205, Math.max(0, alpha)));
+                g2.setColor(new Color(255, 182, 166, innerAlpha));
                 g2.drawOval(sx - innerRadius, sy - innerRadius, innerRadius * 2, innerRadius * 2);
 
+                g2.setColor(new Color(255, 98, 82, lineAlpha));
                 g2.drawLine(sx - spikeGap - spikeLen, sy, sx - spikeGap, sy);
                 g2.drawLine(sx + spikeGap, sy, sx + spikeGap + spikeLen, sy);
                 g2.drawLine(sx, sy - spikeGap - spikeLen, sx, sy - spikeGap);
                 g2.drawLine(sx, sy + spikeGap, sx, sy + spikeGap + spikeLen);
 
-                int diag = (int) Math.round((3.0 + pulse * 3.0) * ZOOM);
-                g2.drawLine(sx - diag, sy - diag, sx + diag, sy + diag);
-                g2.drawLine(sx - diag, sy + diag, sx + diag, sy - diag);
+                g2.setColor(new Color(255, 182, 166, innerAlpha));
+                g2.drawLine(sx - diagRadius, sy - diagRadius, sx + diagRadius, sy + diagRadius);
+                g2.drawLine(sx - diagRadius, sy + diagRadius, sx + diagRadius, sy - diagRadius);
             } else {
-                int outerRadius = (int) Math.round((8.0 + progress * 18.0) * ZOOM);
-                int innerRadius = (int) Math.round((4.0 + pulse * 4.0) * ZOOM);
-                int bracketOffset = (int) Math.round((5.0 + pulse * 2.5) * ZOOM);
-                int bracketLen = (int) Math.round((5.0 + (1.0 - progress) * 4.0) * ZOOM);
+                int outerRadius = scaledClickSize(7.0 + inward * 19.0);
+                int innerRadius = scaledClickSize(3.0 + inward * 8.0);
+                int bracketOffset = scaledClickSize(4.0 + inward * 10.0);
+                int bracketLen = scaledClickSize(4.0 + inward * 6.0);
+                int outerAlpha = visibilityAlpha(68, outerFade);
+                int ringAlpha = visibilityAlpha(220, outerFade);
+                int bracketAlpha = visibilityAlpha(220, innerFade);
 
-                g2.setColor(new Color(88, 236, 132, Math.max(0, alpha / 5)));
+                g2.setColor(new Color(88, 236, 132, outerAlpha));
                 g2.fillOval(sx - outerRadius, sy - outerRadius, outerRadius * 2, outerRadius * 2);
 
-                g2.setStroke(new BasicStroke((float) Math.max(2.0, 3.0 * (1.0 - progress))));
-                g2.setColor(new Color(74, 230, 118, Math.max(0, alpha)));
+                g2.setStroke(new BasicStroke((float) Math.max(1.2, 1.4 * CLICK_MARKER_SCALE + 1.4 * (1.0 - progress))));
+                g2.setColor(new Color(74, 230, 118, ringAlpha));
                 g2.drawOval(sx - outerRadius, sy - outerRadius, outerRadius * 2, outerRadius * 2);
+                g2.setColor(new Color(74, 230, 118, bracketAlpha));
                 g2.drawOval(sx - innerRadius, sy - innerRadius, innerRadius * 2, innerRadius * 2);
 
-                g2.setColor(new Color(205, 255, 219, Math.max(0, alpha)));
+                g2.setColor(new Color(74, 230, 118, bracketAlpha));
                 g2.drawLine(sx - bracketOffset - bracketLen, sy - bracketOffset, sx - bracketOffset, sy - bracketOffset);
                 g2.drawLine(sx - bracketOffset, sy - bracketOffset - bracketLen, sx - bracketOffset, sy - bracketOffset);
 
@@ -3794,7 +3812,16 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
                 g2.drawLine(sx + bracketOffset, sy + bracketOffset, sx + bracketOffset + bracketLen, sy + bracketOffset);
                 g2.drawLine(sx + bracketOffset, sy + bracketOffset, sx + bracketOffset, sy + bracketOffset + bracketLen);
             }
+            g2.setStroke(oldStroke);
         }
+    }
+
+    private int scaledClickSize(double baseSize) {
+        return Math.max(1, (int) Math.round(baseSize * ZOOM * CLICK_MARKER_SCALE));
+    }
+
+    private int visibilityAlpha(int maxAlpha, double visibility) {
+        return Math.max(0, Math.min(255, (int) Math.round(maxAlpha * clamp(visibility, 0.0, 1.0))));
     }
 
     private void drawCreeps(Graphics2D g2) {
@@ -3835,6 +3862,7 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
         }
 
         drawLaneCreepAttackEffect(g2, creep, sx, renderSy, r);
+        drawSelectedCreepHighlight(g2, creep, sx, sy, renderSy, r);
 
         drawHealthBar(g2, sx, renderSy - r - 10, 28, 5,
                 (double) creep.hp / creep.maxHp,
@@ -4375,7 +4403,91 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
                 continue;
             }
             drawHeroBody(g2, hero, sprite, px, py, true);
+            drawSelectedHeroHighlight(g2, hero, sprite, px, py);
         }
+    }
+
+    private void drawSelectedStructureHighlight(Graphics2D g2, Structure structure, int sx, int sy, int radius) {
+        if (!isSelectedPlayerTarget(structure)) {
+            return;
+        }
+
+        if (structure.type == StructureType.TOWER) {
+            drawSelectedTargetContour(
+                    g2,
+                    sx,
+                    sy - (int) Math.round(radius * 0.3),
+                    (int) Math.round(radius * 2.15),
+                    (int) Math.round(radius * 2.95)
+            );
+        } else {
+            drawSelectedTargetContour(
+                    g2,
+                    sx,
+                    sy - (int) Math.round(radius * 0.12),
+                    (int) Math.round(radius * 2.45),
+                    (int) Math.round(radius * 2.18)
+            );
+        }
+    }
+
+    private void drawSelectedCreepHighlight(Graphics2D g2, Creep creep, int sx, int sy, int renderSy, int radius) {
+        if (!isSelectedPlayerTarget(creep)) {
+            return;
+        }
+
+        int width = deathBodyWidth(creep, radius);
+        int height = deathBodyHeight(creep, radius);
+        int centerY = creep.role == CreepRole.LANE
+                ? renderSy - (int) Math.round(height * 0.08)
+                : sy - (int) Math.round(height * 0.05);
+        drawSelectedTargetContour(g2, sx, centerY, width + 4, height + 4);
+    }
+
+    private void drawSelectedHeroHighlight(Graphics2D g2, Player hero, BufferedImage sprite, int px, int py) {
+        if (!isSelectedPlayerTarget(hero)) {
+            return;
+        }
+
+        int width = (int) Math.round(sprite.getWidth() * ZOOM * HERO_RENDER_SCALE);
+        int height = (int) Math.round(sprite.getHeight() * ZOOM * HERO_RENDER_SCALE);
+        drawSelectedTargetContour(g2, px, py - (int) Math.round(height * 0.06), width + 4, height + 4);
+    }
+
+    private boolean isSelectedPlayerTarget(CombatEntity entity) {
+        return entity != null
+                && entity == playerAttackTarget
+                && playerAttackTarget != null
+                && isValidPlayerAttackTarget(playerAttackTarget);
+    }
+
+    private void drawSelectedTargetContour(Graphics2D g2, int centerX, int centerY, int width, int height) {
+        double pulse = 0.5 + 0.5 * Math.sin(System.nanoTime() * 1.0e-9 * SELECTED_TARGET_GLOW_SPEED);
+        int glowExpand = (int) Math.round((3.0 + pulse * 2.0) * ZOOM * 0.5);
+        int outerX = centerX - width / 2 - glowExpand;
+        int outerY = centerY - height / 2 - glowExpand;
+        int outerW = width + glowExpand * 2;
+        int outerH = height + glowExpand * 2;
+
+        Stroke oldStroke = g2.getStroke();
+        g2.setColor(new Color(255, 204, 72, 54 + (int) Math.round(pulse * 26.0)));
+        g2.setStroke(new BasicStroke((float) (4.2 + pulse * 1.4), BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+        g2.drawOval(outerX, outerY, outerW, outerH);
+
+        g2.setColor(new Color(255, 214, 92, 205));
+        g2.setStroke(new BasicStroke(2.2f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+        g2.drawOval(centerX - width / 2, centerY - height / 2, width, height);
+
+        int innerInset = Math.max(1, (int) Math.round((1.0 + pulse * 1.2) * ZOOM * 0.3));
+        g2.setColor(new Color(255, 244, 186, 172));
+        g2.setStroke(new BasicStroke(1.2f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+        g2.drawOval(
+                centerX - width / 2 + innerInset,
+                centerY - height / 2 + innerInset,
+                Math.max(2, width - innerInset * 2),
+                Math.max(2, height - innerInset * 2)
+        );
+        g2.setStroke(oldStroke);
     }
 
     private BufferedImage heroSprite(Player hero) {
