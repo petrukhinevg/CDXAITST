@@ -1594,22 +1594,9 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
         g2.setColor(new Color(240, 236, 198, 60));
         g2.fill(area);
 
-        g2.setStroke(new BasicStroke(1.8f));
-        for (int stripe = 0; stripe < 8; stripe++) {
-            double t = stripe / 7.0;
-            double angle = start + (end - start) * t;
-            int x1 = (int) Math.round(px + Math.cos(angle) * innerR);
-            int y1 = (int) Math.round(py + Math.sin(angle) * innerR);
-            int x2 = (int) Math.round(px + Math.cos(angle) * outerR);
-            int y2 = (int) Math.round(py + Math.sin(angle) * outerR);
-            g2.setColor(new Color(255, 245, 182, 180));
-            g2.drawLine(x1, y1, x2, y2);
-        }
-
         g2.setColor(new Color(255, 235, 170, 160));
         g2.setStroke(new BasicStroke((float) (2.2f * ZOOM / 2.0)));
-        int startDeg = (int) Math.round(Math.toDegrees(start));
-        g2.drawArc(px - outerR, py - outerR, outerR * 2, outerR * 2, -startDeg, (int) currentWeapon.meleeArcDegrees());
+        g2.draw(area);
     }
 
     private record PlayerPalette(Color primary, Color shadow, Color darkCloth, Color helmetMain, Color helmetShadow) {
