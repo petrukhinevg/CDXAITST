@@ -18,11 +18,11 @@ size 80 80
 player_start 10 70
 light_throne 8 73
 dark_throne 73 8
-light_top_towers 6,55 6,32
+light_top_towers 10,55 6,32
 light_mid_towers 21,57 36,48
-light_bot_towers 25,71 49,71
+light_bot_towers 25,75 49,75
 dark_top_towers 55,6 28,6
-dark_mid_towers 62,22 46,34
+dark_mid_towers 62,22 45,33
 dark_bot_towers 75,26 71,47
 lane_path l1 8,73 8,57 8,41 8,25 8,8 28,8 50,8 73,8
 lane_path l2 8,73 21,60 34,47 40,40 47,34 60,21 73,8
