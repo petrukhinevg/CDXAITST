@@ -11,6 +11,7 @@ import org.dyn4j.geometry.Vector2;
 import java.util.List;
 
 public final class UnitCollisionResolver {
+    private static final int RESOLUTION_PASSES = 4;
     private final Gjk detector = new Gjk();
 
     @FunctionalInterface
@@ -19,7 +20,7 @@ public final class UnitCollisionResolver {
     }
 
     public void resolve(List<? extends CombatEntity> units, MovementAdapter movementAdapter) {
-        for (int pass = 0; pass < 2; pass++) {
+        for (int pass = 0; pass < RESOLUTION_PASSES; pass++) {
             for (int i = 0; i < units.size(); i++) {
                 for (int j = i + 1; j < units.size(); j++) {
                     resolvePair(units.get(i), units.get(j), movementAdapter);

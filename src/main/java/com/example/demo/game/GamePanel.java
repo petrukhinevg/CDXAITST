@@ -23,6 +23,7 @@ import com.example.demo.game.render.SpriteLibrary;
 import com.example.demo.game.world.GameMap;
 import com.example.demo.game.world.blueprint.MapBlueprint;
 import com.example.demo.game.world.blueprint.MapBlueprintLoader;
+import com.example.demo.game.world.element.GroundKind;
 
 import javax.swing.JPanel;
 import javax.swing.Timer;
@@ -37,6 +38,7 @@ import java.awt.GraphicsEnvironment;
 import java.awt.AlphaComposite;
 import java.awt.Composite;
 import java.awt.geom.Path2D;
+import java.awt.geom.Point2D;
 import java.awt.Point;
 import java.awt.RenderingHints;
 import java.awt.Stroke;
@@ -72,6 +74,24 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
     private static final double CLICK_TARGET_PADDING = 8.0;
     private static final double CREEP_PATH_REBUILD_INTERVAL = 0.35;
     private static final double CREEP_WAYPOINT_REACHED_DISTANCE = 8.0;
+    private static final double UNIT_DIAMETER_TILES = 0.8;
+    private static final double STANDARD_UNIT_RADIUS = GameConfig.TILE * UNIT_DIAMETER_TILES * 0.5;
+    private static final double CREEP_LANE_SLOT_SPACING = STANDARD_UNIT_RADIUS * 0.55;
+    private static final double CREEP_LANE_LOOKAHEAD = GameConfig.TILE * 1.1;
+    private static final double CREEP_SEPARATION_RANGE = STANDARD_UNIT_RADIUS * 3.0;
+    private static final double CREEP_STRUCTURE_AVOID_RANGE = GameConfig.TILE * 0.9;
+    private static final double CREEP_TARGET_WEIGHT = 1.35;
+    private static final double CREEP_SEPARATION_WEIGHT = 1.65;
+    private static final double CREEP_STRUCTURE_AVOID_WEIGHT = 1.3;
+    private static final double CREEP_FORWARD_WEIGHT = 0.18;
+    private static final double TREE_PLACEMENT_CHANCE = 0.18;
+    private static final int TREE_LANE_CLEAR_RADIUS = 3;
+    private static final int MAX_TREES_PER_ROW = 10;
+    private static final int MAX_TREES_PER_COLUMN = 10;
+    private static final int CREEP_STRUCTURE_APPROACH_SAMPLES = 16;
+    private static final double CREEP_STRUCTURE_SLOT_ARC = Math.PI / 7.0;
+    private static final double CREEP_COMBAT_SLOT_ARC = Math.PI / 10.0;
+    private static final double CREEP_STRUCTURE_APPROACH_BUFFER = 2.0;
     private static final double CAMERA_MOVE_SPEED = 240.0;
     private static final double CAMERA_EDGE_MOVE_SPEED = 420.0;
     private static final int CAMERA_EDGE_SCROLL_MARGIN = 28;
@@ -150,6 +170,7 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
     private int currentFps;
     private int framesThisSecond;
     private long fpsWindowStartNanos;
+    private int laneCreepSpawnSequence;
 
     public GamePanel() {
         setPreferredSize(new Dimension(GameConfig.VIEW_W, GameConfig.VIEW_H));
@@ -196,6 +217,7 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
         kills = 0;
         gameOver = false;
         victoryText = "";
+        laneCreepSpawnSequence = 0;
         clearPlayerOrders();
 
         spawnLaneWave();
@@ -219,7 +241,7 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
         hero.y = map.tileCenter(startTile.y);
         hero.spawnX = hero.x;
         hero.spawnY = hero.y;
-        hero.radius = 14.5;
+        hero.radius = STANDARD_UNIT_RADIUS;
         hero.team = team;
         hero.maxHp = 120;
         hero.hp = hero.maxHp;
@@ -243,7 +265,83 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
     private void regenerateMap() {
         mapBlueprint = mapBlueprintLoader.load("/maps/default.map");
         mapBlueprint.applyTo(map, random);
+        populateGrassTrees();
         rebuildMapLayers();
+    }
+
+    private void populateGrassTrees() {
+        int width = map.getWidth();
+        int height = map.getHeight();
+        boolean[][] reserved = new boolean[height][width];
+        reserveTreeTile(reserved, mapBlueprint.playerStart());
+        reserveTreeTile(reserved, mapBlueprint.throneTile(Team.LIGHT));
+        reserveTreeTile(reserved, mapBlueprint.throneTile(Team.DARK));
+        for (Team team : List.of(Team.LIGHT, Team.DARK)) {
+            for (LaneType lane : LaneType.values()) {
+                for (Point tile : mapBlueprint.towerTiles(team, lane)) {
+                    reserveTreeTile(reserved, tile);
+                }
+            }
+        }
+
+        List<Point> candidates = new ArrayList<>();
+        for (int y = 0; y < height; y++) {
+            for (int x = 0; x < width; x++) {
+                if (isGrassTreeCandidate(x, y, reserved)) {
+                    candidates.add(new Point(x, y));
+                }
+            }
+        }
+
+        Collections.shuffle(candidates, random);
+        int[] rowTreeCounts = new int[height];
+        int[] columnTreeCounts = new int[width];
+        for (Point candidate : candidates) {
+            if (rowTreeCounts[candidate.y] >= MAX_TREES_PER_ROW
+                    || columnTreeCounts[candidate.x] >= MAX_TREES_PER_COLUMN
+                    || random.nextDouble() >= TREE_PLACEMENT_CHANCE) {
+                continue;
+            }
+
+            map.setBlocked(candidate.x, candidate.y, true);
+            map.setProp(candidate.x, candidate.y, null);
+            rowTreeCounts[candidate.y]++;
+            columnTreeCounts[candidate.x]++;
+        }
+    }
+
+    private void reserveTreeTile(boolean[][] reserved, Point tile) {
+        if (tile != null && map.inBounds(tile.x, tile.y)) {
+            reserved[tile.y][tile.x] = true;
+        }
+    }
+
+    private boolean isGrassTreeCandidate(int x, int y, boolean[][] reserved) {
+        if (reserved[y][x]
+                || map.isBlocked(x, y)
+                || map.isLane(x, y)
+                || isWithinLaneTreeClearRadius(x, y)
+                || map.getWater(x, y) != null
+                || map.getProp(x, y) != null) {
+            return false;
+        }
+
+        GroundKind groundKind = map.getGround(x, y).kind();
+        return groundKind == GroundKind.GRASS || groundKind == GroundKind.GRASS_ALT;
+    }
+
+    private boolean isWithinLaneTreeClearRadius(int tileX, int tileY) {
+        for (int y = tileY - TREE_LANE_CLEAR_RADIUS; y <= tileY + TREE_LANE_CLEAR_RADIUS; y++) {
+            for (int x = tileX - TREE_LANE_CLEAR_RADIUS; x <= tileX + TREE_LANE_CLEAR_RADIUS; x++) {
+                if (!map.inBounds(x, y) || !map.isLane(x, y)) {
+                    continue;
+                }
+                if (tileDistance(tileX, tileY, x, y) <= TREE_LANE_CLEAR_RADIUS) {
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 
     private void rebuildMapLayers() {
@@ -366,7 +464,7 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
         creep.lane = lane;
         creep.x = map.tileCenter(start.x) + perpX * shift * map.getTileSize();
         creep.y = map.tileCenter(start.y) + perpY * shift * map.getTileSize();
-        creep.radius = 9.5;
+        creep.radius = STANDARD_UNIT_RADIUS;
         creep.maxHp = 58;
         creep.hp = creep.maxHp;
         creep.damage = 7;
@@ -375,6 +473,7 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
         creep.attackRange = scaleAttackRange(31);
         creep.attackCooldown = 0.82;
         creep.attackTimer = 0.12 * idx;
+        creep.formationSlot = Math.floorMod(laneCreepSpawnSequence++, 5) - 2;
         creep.waypointIndex = 1;
         creep.animPhase = random.nextDouble() * 3.0;
         creep.lookAngle = Math.atan2(next.y - start.y, next.x - start.x);
@@ -1058,7 +1157,16 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
     private void engageCreepTarget(Creep creep, Creep target, double dt) {
         double dist = distance(creep.x, creep.y, target.x, target.y);
         if (dist > creep.attackRange + target.radius) {
-            moveTowards(creep, target.x, target.y, creep.moveSpeed * dt);
+            Point2D.Double laneForward = currentLaneForward(creep);
+            Point2D.Double approachPoint = findCombatApproachPoint(creep, target, creep.attackRange, CREEP_COMBAT_SLOT_ARC);
+            steerCreepTowards(
+                    creep,
+                    approachPoint != null ? approachPoint.x : target.x,
+                    approachPoint != null ? approachPoint.y : target.y,
+                    laneForward.x,
+                    laneForward.y,
+                    dt
+            );
             return;
         }
 
@@ -1072,7 +1180,13 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
     private void engageStructureTarget(Creep creep, Structure target, double dt) {
         double dist = distance(creep.x, creep.y, target.x, target.y);
         if (dist > creep.attackRange + target.radius) {
-            moveTowards(creep, target.x, target.y, creep.moveSpeed * dt);
+            Point2D.Double laneForward = currentLaneForward(creep);
+            Point2D.Double approachPoint = findCombatApproachPoint(creep, target, creep.attackRange, CREEP_STRUCTURE_SLOT_ARC);
+            if (approachPoint != null) {
+                steerCreepTowards(creep, approachPoint.x, approachPoint.y, laneForward.x, laneForward.y, dt);
+            } else {
+                creep.moving = false;
+            }
             return;
         }
 
@@ -1086,7 +1200,16 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
     private void engageHeroTarget(Creep creep, Player hero, double dt) {
         double dist = distance(creep.x, creep.y, hero.x, hero.y);
         if (dist > creep.attackRange + hero.radius) {
-            moveTowards(creep, hero.x, hero.y, creep.moveSpeed * dt);
+            Point2D.Double laneForward = currentLaneForward(creep);
+            Point2D.Double approachPoint = findCombatApproachPoint(creep, hero, creep.attackRange, CREEP_COMBAT_SLOT_ARC);
+            steerCreepTowards(
+                    creep,
+                    approachPoint != null ? approachPoint.x : hero.x,
+                    approachPoint != null ? approachPoint.y : hero.y,
+                    laneForward.x,
+                    laneForward.y,
+                    dt
+            );
             return;
         }
 
@@ -1099,27 +1222,60 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
 
     private void moveAlongLane(Creep creep, double dt) {
         List<Point> path = lanePaths.get(creep.team).get(creep.lane);
-        if (path == null || path.isEmpty()) {
+        if (path == null || path.size() < 2) {
             return;
         }
 
+        if (creep.waypointIndex <= 0) {
+            creep.waypointIndex = 1;
+        }
         if (creep.waypointIndex >= path.size()) {
             creep.waypointIndex = path.size() - 1;
         }
 
+        Point previousPoint = path.get(creep.waypointIndex - 1);
         Point targetPoint = path.get(creep.waypointIndex);
-        double tx = map.tileCenter(targetPoint.x);
-        double ty = map.tileCenter(targetPoint.y);
+        double previousX = map.tileCenter(previousPoint.x);
+        double previousY = map.tileCenter(previousPoint.y);
+        double targetX = map.tileCenter(targetPoint.x);
+        double targetY = map.tileCenter(targetPoint.y);
 
-        if (distance(creep.x, creep.y, tx, ty) < 10.0 && creep.waypointIndex < path.size() - 1) {
-            creep.waypointIndex++;
-            clearCreepLanePath(creep);
-            targetPoint = path.get(creep.waypointIndex);
-            tx = map.tileCenter(targetPoint.x);
-            ty = map.tileCenter(targetPoint.y);
+        double segmentX = targetX - previousX;
+        double segmentY = targetY - previousY;
+        double segmentLength = Math.hypot(segmentX, segmentY);
+        if (segmentLength < 0.001) {
+            creep.moving = false;
+            return;
         }
 
-        followLanePath(creep, dt, targetPoint, tx, ty);
+        double projection = ((creep.x - previousX) * segmentX + (creep.y - previousY) * segmentY)
+                / (segmentLength * segmentLength);
+        projection = clamp(projection, 0.0, 1.0);
+        if ((projection > 0.82 || distance(creep.x, creep.y, targetX, targetY) < CREEP_WAYPOINT_REACHED_DISTANCE)
+                && creep.waypointIndex < path.size() - 1) {
+            creep.waypointIndex++;
+            previousPoint = path.get(creep.waypointIndex - 1);
+            targetPoint = path.get(creep.waypointIndex);
+            previousX = map.tileCenter(previousPoint.x);
+            previousY = map.tileCenter(previousPoint.y);
+            targetX = map.tileCenter(targetPoint.x);
+            targetY = map.tileCenter(targetPoint.y);
+            segmentX = targetX - previousX;
+            segmentY = targetY - previousY;
+            segmentLength = Math.hypot(segmentX, segmentY);
+            projection = 0.0;
+        }
+
+        double lookAhead = Math.min(segmentLength, CREEP_LANE_LOOKAHEAD + creep.moveSpeed * 0.12);
+        double lookAheadRatio = segmentLength < 0.001 ? 1.0 : lookAhead / segmentLength;
+        double targetRatio = clamp(projection + lookAheadRatio, 0.08, 1.0);
+        double anchorX = previousX + segmentX * targetRatio;
+        double anchorY = previousY + segmentY * targetRatio;
+        Point2D.Double formationTarget = projectLaneFormationPoint(creep, anchorX, anchorY, segmentX, segmentY);
+        if (formationTarget == null) {
+            formationTarget = new Point2D.Double(anchorX, anchorY);
+        }
+        steerCreepTowards(creep, formationTarget.x, formationTarget.y, segmentX, segmentY, dt);
     }
 
     private void moveTowards(Creep creep, double tx, double ty, double distanceStep) {
@@ -1138,27 +1294,154 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
         creep.moving = moveCombatUnit(creep, dirX * step, dirY * step);
     }
 
-    private void followLanePath(Creep creep, double dt, Point goalTile, double goalX, double goalY) {
-        if (creep.laneNavigationGoalIndex != creep.waypointIndex
-                || creep.laneNavigationPath.isEmpty()
-                || creep.laneRepathCooldown <= 0.0) {
-            rebuildCreepLanePath(creep, goalTile);
+    private Point2D.Double projectLaneFormationPoint(Creep creep, double baseX, double baseY, double dirX, double dirY) {
+        double len = Math.hypot(dirX, dirY);
+        if (len < 0.0001) {
+            return canOccupy(creep, baseX, baseY) ? new Point2D.Double(baseX, baseY) : null;
         }
 
-        while (!creep.laneNavigationPath.isEmpty()) {
-            Point waypoint = creep.laneNavigationPath.get(0);
-            double waypointX = map.tileCenter(waypoint.x);
-            double waypointY = map.tileCenter(waypoint.y);
-            if (distance(creep.x, creep.y, waypointX, waypointY) <= CREEP_WAYPOINT_REACHED_DISTANCE) {
-                creep.laneNavigationPath.remove(0);
-                continue;
+        double perpX = -dirY / len;
+        double perpY = dirX / len;
+        double[] scales = {1.0, 0.6, 0.3, 0.0};
+        for (double scale : scales) {
+            double offset = creep.formationSlot * CREEP_LANE_SLOT_SPACING * scale;
+            double candidateX = baseX + perpX * offset;
+            double candidateY = baseY + perpY * offset;
+            if (canOccupy(creep, candidateX, candidateY)) {
+                return new Point2D.Double(candidateX, candidateY);
             }
+        }
 
-            moveTowards(creep, waypointX, waypointY, creep.moveSpeed * dt);
+        return null;
+    }
+
+    private Point2D.Double currentLaneForward(Creep creep) {
+        List<Point> path = lanePaths.get(creep.team).get(creep.lane);
+        if (path == null || path.size() < 2) {
+            return new Point2D.Double(0.0, 0.0);
+        }
+
+        int index = Math.max(1, Math.min(creep.waypointIndex, path.size() - 1));
+        Point previousPoint = path.get(index - 1);
+        Point targetPoint = path.get(index);
+        return new Point2D.Double(
+                map.tileCenter(targetPoint.x) - map.tileCenter(previousPoint.x),
+                map.tileCenter(targetPoint.y) - map.tileCenter(previousPoint.y)
+        );
+    }
+
+    private void steerCreepTowards(Creep creep, double targetX, double targetY, double laneDirX, double laneDirY, double dt) {
+        double desiredX = targetX - creep.x;
+        double desiredY = targetY - creep.y;
+        double desiredLength = Math.hypot(desiredX, desiredY);
+        if (desiredLength < 0.001) {
+            creep.moving = false;
             return;
         }
 
-        moveTowards(creep, goalX, goalY, creep.moveSpeed * dt);
+        double desiredNX = desiredX / desiredLength;
+        double desiredNY = desiredY / desiredLength;
+        double separationX = 0.0;
+        double separationY = 0.0;
+        for (Creep other : laneCreeps) {
+            if (other == creep || other.hp <= 0 || other.team != creep.team || other.lane != creep.lane) {
+                continue;
+            }
+
+            double dx = creep.x - other.x;
+            double dy = creep.y - other.y;
+            double dist = Math.hypot(dx, dy);
+            if (dist < 0.001 || dist >= CREEP_SEPARATION_RANGE) {
+                continue;
+            }
+
+            double strength = (CREEP_SEPARATION_RANGE - dist) / CREEP_SEPARATION_RANGE;
+            separationX += dx / dist * strength;
+            separationY += dy / dist * strength;
+        }
+
+        double structureAvoidX = 0.0;
+        double structureAvoidY = 0.0;
+        for (Structure structure : structures) {
+            if (structure.hp <= 0) {
+                continue;
+            }
+
+            double dx = creep.x - structure.x;
+            double dy = creep.y - structure.y;
+            double dist = Math.hypot(dx, dy);
+            double safeDistance = structure.radius + creep.radius + CREEP_STRUCTURE_AVOID_RANGE;
+            if (dist < 0.001 || dist >= safeDistance) {
+                continue;
+            }
+
+            double strength = (safeDistance - dist) / safeDistance;
+            structureAvoidX += dx / dist * strength;
+            structureAvoidY += dy / dist * strength;
+        }
+
+        double laneForwardLength = Math.hypot(laneDirX, laneDirY);
+        double forwardX = laneForwardLength < 0.001 ? 0.0 : laneDirX / laneForwardLength;
+        double forwardY = laneForwardLength < 0.001 ? 0.0 : laneDirY / laneForwardLength;
+
+        double steerX = desiredNX * CREEP_TARGET_WEIGHT
+                + separationX * CREEP_SEPARATION_WEIGHT
+                + structureAvoidX * CREEP_STRUCTURE_AVOID_WEIGHT
+                + forwardX * CREEP_FORWARD_WEIGHT;
+        double steerY = desiredNY * CREEP_TARGET_WEIGHT
+                + separationY * CREEP_SEPARATION_WEIGHT
+                + structureAvoidY * CREEP_STRUCTURE_AVOID_WEIGHT
+                + forwardY * CREEP_FORWARD_WEIGHT;
+        double steerLength = Math.hypot(steerX, steerY);
+        if (steerLength < 0.001) {
+            steerX = desiredNX;
+            steerY = desiredNY;
+            steerLength = 1.0;
+        }
+
+        double step = Math.min(creep.moveSpeed * dt, desiredLength);
+        creep.lookAngle = Math.atan2(steerY, steerX);
+        creep.moving = moveCombatUnit(creep, steerX / steerLength * step, steerY / steerLength * step);
+    }
+
+    private Point2D.Double findCombatApproachPoint(Creep creep, CombatEntity target, double desiredRange, double slotArc) {
+        double desiredDistance = Math.max(
+                target.getRadius() + creep.radius + 1.0,
+                target.getRadius() + desiredRange - CREEP_STRUCTURE_APPROACH_BUFFER
+        );
+        double preferredAngle = Math.atan2(creep.y - target.getY(), creep.x - target.getX());
+        double slotAngle = preferredAngle + creep.formationSlot * slotArc;
+        Point2D.Double bestPoint = null;
+        double bestScore = Double.POSITIVE_INFINITY;
+
+        double[] radii = {
+                desiredDistance,
+                desiredDistance + creep.radius * 0.8,
+                desiredDistance + creep.radius * 1.6
+        };
+        for (double radius : radii) {
+            for (int i = 0; i < CREEP_STRUCTURE_APPROACH_SAMPLES; i++) {
+                double angle = (Math.PI * 2.0 * i) / CREEP_STRUCTURE_APPROACH_SAMPLES;
+                double candidateX = target.getX() + Math.cos(angle) * radius;
+                double candidateY = target.getY() + Math.sin(angle) * radius;
+                if (!canOccupy(creep, candidateX, candidateY)) {
+                    continue;
+                }
+
+                double anglePenalty = Math.abs(normalizeAngle(angle - slotAngle)) * radius * 0.45;
+                double score = distance(creep.x, creep.y, candidateX, candidateY) + anglePenalty;
+                if (score < bestScore) {
+                    bestScore = score;
+                    bestPoint = new Point2D.Double(candidateX, candidateY);
+                }
+            }
+
+            if (bestPoint != null) {
+                return bestPoint;
+            }
+        }
+
+        return null;
     }
 
     private void rebuildCreepLanePath(Creep creep, Point goalTile) {

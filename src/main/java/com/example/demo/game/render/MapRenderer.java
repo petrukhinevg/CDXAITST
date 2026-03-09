@@ -62,6 +62,9 @@ public class MapRenderer {
             case HIGH_GROUND -> new Color(126, 160, 102);
             case BASE -> new Color(126, 118, 108);
         };
+        if (map.isBlocked(tileX, tileY) && (type == GroundKind.GRASS || type == GroundKind.GRASS_ALT)) {
+            base = type == GroundKind.GRASS ? new Color(74, 109, 63) : new Color(63, 96, 54);
+        }
 
         int noise = tileNoise(tileX, tileY);
         int variation = (noise & 7) - 3;
@@ -75,6 +78,9 @@ public class MapRenderer {
 
         if (type == GroundKind.FOREST && ((noise >> 4) & 31) < 6) {
             variation -= 5;
+        }
+        if (map.isBlocked(tileX, tileY) && (type == GroundKind.GRASS || type == GroundKind.GRASS_ALT)) {
+            variation -= 2;
         }
 
         g2.setColor(shift(base, variation * 2));
