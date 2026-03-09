@@ -1,5 +1,9 @@
 package com.example.demo.game.model;
 
+import java.awt.Point;
+import java.util.ArrayList;
+import java.util.List;
+
 public class Creep implements CombatUnit {
     public Team team;
     public CreepRole role;
@@ -32,6 +36,9 @@ public class Creep implements CombatUnit {
     public double lookAngle;
     public double attackAnimationTimer;
     public AnimationState state = AnimationState.IDLE;
+    public final List<Point> laneNavigationPath = new ArrayList<>();
+    public int laneNavigationGoalIndex = -1;
+    public double laneRepathCooldown;
 
     @Override
     public Team getTeam() {

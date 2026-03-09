@@ -1,6 +1,7 @@
 package com.example.demo.game.world;
 
 import com.example.demo.game.config.GameConfig;
+import com.example.demo.game.model.LaneType;
 import com.example.demo.game.world.element.GroundElement;
 import com.example.demo.game.world.element.MapElements;
 import com.example.demo.game.world.element.PropElement;
@@ -15,6 +16,7 @@ public class GameMap {
 
     private final boolean[][] blocked;
     private final boolean[][] lane;
+    private final int[][] laneMask;
     private final int[][] elevation;
 
     private final GroundElement[][] ground;
@@ -34,6 +36,7 @@ public class GameMap {
 
         blocked = new boolean[height][width];
         lane = new boolean[height][width];
+        laneMask = new int[height][width];
         elevation = new int[height][width];
 
         ground = new GroundElement[height][width];
@@ -48,6 +51,7 @@ public class GameMap {
             for (int x = 0; x < width; x++) {
                 blocked[y][x] = false;
                 lane[y][x] = false;
+                laneMask[y][x] = 0;
                 elevation[y][x] = 0;
                 ground[y][x] = MapElements.GRASS;
                 water[y][x] = null;
@@ -76,6 +80,18 @@ public class GameMap {
 
     public void setLane(int x, int y, boolean value) {
         lane[y][x] = value;
+        if (!value) {
+            laneMask[y][x] = 0;
+        }
+    }
+
+    public void setLaneMask(int x, int y, int mask) {
+        laneMask[y][x] = mask;
+        lane[y][x] = mask != 0;
+    }
+
+    public boolean hasLaneType(int x, int y, LaneType laneType) {
+        return (laneMask[y][x] & laneBit(laneType)) != 0;
     }
 
     public boolean isRiver(int x, int y) {
@@ -165,5 +181,13 @@ public class GameMap {
 
     public double tileCenter(int tileIndex) {
         return tileIndex * tileSize + tileSize / 2.0;
+    }
+
+    private int laneBit(LaneType laneType) {
+        return switch (laneType) {
+            case TOP -> 1;
+            case MID -> 1 << 1;
+            case BOT -> 1 << 2;
+        };
     }
 }

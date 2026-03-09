@@ -22,6 +22,7 @@ public final class MapBlueprint {
     private final PropElement[][] props;
     private final boolean[][] blocked;
     private final boolean[][] lane;
+    private final int[][] laneMask;
     private final Point playerStart;
     private final Point lightThrone;
     private final Point darkThrone;
@@ -35,6 +36,7 @@ public final class MapBlueprint {
                         PropElement[][] props,
                         boolean[][] blocked,
                         boolean[][] lane,
+                        int[][] laneMask,
                         Point playerStart,
                         Point lightThrone,
                         Point darkThrone,
@@ -47,6 +49,7 @@ public final class MapBlueprint {
         this.props = props;
         this.blocked = blocked;
         this.lane = lane;
+        this.laneMask = laneMask;
         this.playerStart = playerStart;
         this.lightThrone = lightThrone;
         this.darkThrone = darkThrone;
@@ -68,6 +71,7 @@ public final class MapBlueprint {
                 map.setProp(x, y, props[y][x]);
                 map.setBlocked(x, y, blocked[y][x]);
                 map.setLane(x, y, lane[y][x]);
+                map.setLaneMask(x, y, laneMask[y][x]);
             }
         }
     }

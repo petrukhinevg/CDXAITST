@@ -41,11 +41,13 @@ import java.awt.Point;
 import java.awt.RenderingHints;
 import java.awt.image.BufferedImage;
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
 import java.util.Comparator;
 import java.util.EnumMap;
 import java.util.Iterator;
 import java.util.List;
-import java.util.Map;
+import java.util.PriorityQueue;
 import java.util.Random;
 import java.awt.event.KeyEvent;
 import java.awt.event.KeyListener;
@@ -60,6 +62,16 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
     private static final double EXPERIENCE_ORB_LIFETIME = 15.0;
     private static final double EXPERIENCE_MAGNET_RADIUS = 140.0;
     private static final double EXPERIENCE_PICKUP_RADIUS = 38.0;
+    private static final double PLAYER_MOVE_SPEED = 107.5;
+    private static final double PLAYER_WAYPOINT_REACHED_DISTANCE = 8.0;
+    private static final double PLAYER_DESTINATION_REACHED_DISTANCE = 10.0;
+    private static final double PLAYER_PATH_REBUILD_INTERVAL = 0.18;
+    private static final double CLICK_TARGET_PADDING = 8.0;
+    private static final double CREEP_PATH_REBUILD_INTERVAL = 0.35;
+    private static final double CREEP_WAYPOINT_REACHED_DISTANCE = 8.0;
+    private static final double CAMERA_MOVE_SPEED = 240.0;
+    private static final double CAMERA_EDGE_MOVE_SPEED = 420.0;
+    private static final int CAMERA_EDGE_SCROLL_MARGIN = 28;
 
     private final Random random = new Random();
 
@@ -96,7 +108,14 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
     private boolean down;
     private boolean left;
     private boolean right;
-    private boolean attackMouseDown;
+    private boolean cameraUp;
+    private boolean cameraDown;
+    private boolean cameraLeft;
+    private boolean cameraRight;
+    private boolean middleMouseDragging;
+    private boolean mouseInsideWindow;
+    private int dragLastMouseX;
+    private int dragLastMouseY;
     private int mouseX;
     private int mouseY;
 
@@ -107,10 +126,19 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
     private double muzzleFlashTime;
     private double swordSwingTime;
     private double laneWaveTimer;
+    private double playerPathRefreshCooldown;
 
     private int kills;
     private boolean gameOver;
     private String victoryText = "";
+
+    private boolean playerMoveOrderActive;
+    private double playerOrderX;
+    private double playerOrderY;
+    private double playerPathFinalX;
+    private double playerPathFinalY;
+    private Creep playerAttackTarget;
+    private final List<Point> playerPath = new ArrayList<>();
 
     private final int targetFps = detectTargetFps();
     private final Timer gameTimer;
@@ -159,11 +187,12 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
         muzzleFlashTime = 0.0;
         swordSwingTime = 0.0;
         laneWaveTimer = 15.0;
+        playerPathRefreshCooldown = 0.0;
 
         kills = 0;
         gameOver = false;
         victoryText = "";
-        attackMouseDown = false;
+        clearPlayerOrders();
 
         spawnLaneWave();
 
@@ -202,6 +231,9 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
         hero.attackTimer = 0.0;
         hero.attackAnimationTimer = 0.0;
         hero.state = AnimationState.IDLE;
+        if (hero == player) {
+            clearPlayerOrders();
+        }
     }
 
     private void regenerateMap() {
@@ -342,6 +374,8 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
         creep.waypointIndex = 1;
         creep.animPhase = random.nextDouble() * 3.0;
         creep.lookAngle = Math.atan2(next.y - start.y, next.x - start.x);
+        creep.laneNavigationGoalIndex = -1;
+        creep.laneRepathCooldown = 0.0;
         laneCreeps.add(creep);
     }
 
@@ -365,6 +399,7 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
         attackCooldown = Math.max(0.0, attackCooldown - dt);
         muzzleFlashTime = Math.max(0.0, muzzleFlashTime - dt);
         swordSwingTime = Math.max(0.0, swordSwingTime - dt);
+        playerPathRefreshCooldown = Math.max(0.0, playerPathRefreshCooldown - dt);
 
         for (Player hero : heroes) {
             if (hero.hp <= 0) {
@@ -395,10 +430,7 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
 
         boolean moved = false;
         if (!gameOver && player.hp > 0) {
-            moved = movePlayer(dt);
-            if (attackMouseDown && attackCooldown <= 0.0) {
-                attackWithCurrentWeapon();
-            }
+            moved = updatePlayerControl(dt);
         }
 
         updatePlayerAnimation(dt, moved);
@@ -410,7 +442,7 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
         updateExperienceOrbs(dt);
 
         checkVictory();
-        centerCameraOnPlayer();
+        updateCamera(dt);
     }
 
     private void updatePlayerAnimation(double dt, boolean moved) {
@@ -443,7 +475,28 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
         }
     }
 
-    private boolean movePlayer(double dt) {
+    private boolean updatePlayerControl(double dt) {
+        if (hasMovementInput()) {
+            clearPlayerOrders();
+            return movePlayerByKeyboard(dt);
+        }
+
+        if (playerAttackTarget != null) {
+            return updatePlayerAttackOrder(dt);
+        }
+
+        if (playerMoveOrderActive) {
+            return updatePlayerMoveOrder(dt);
+        }
+
+        return false;
+    }
+
+    private boolean hasMovementInput() {
+        return up || down || left || right;
+    }
+
+    private boolean movePlayerByKeyboard(double dt) {
         if (player.hp <= 0) {
             return false;
         }
@@ -463,8 +516,341 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
         inputX /= len;
         inputY /= len;
 
-        double speed = 215.0;
-        return moveCombatUnit(player, inputX * speed * dt, inputY * speed * dt);
+        return moveCombatUnit(player, inputX * PLAYER_MOVE_SPEED * dt, inputY * PLAYER_MOVE_SPEED * dt);
+    }
+
+    private boolean updatePlayerMoveOrder(double dt) {
+        boolean moved = followPlayerPath(dt, playerOrderX, playerOrderY);
+        if (distance(player.x, player.y, playerOrderX, playerOrderY) <= PLAYER_DESTINATION_REACHED_DISTANCE) {
+            clearPlayerOrders();
+        }
+        return moved;
+    }
+
+    private boolean updatePlayerAttackOrder(double dt) {
+        if (playerAttackTarget == null || playerAttackTarget.hp <= 0) {
+            clearPlayerOrders();
+            return false;
+        }
+
+        player.aimAngle = Math.atan2(playerAttackTarget.y - player.y, playerAttackTarget.x - player.x);
+        double attackReach = playerAttackReach(playerAttackTarget);
+        if (canPlayerAttackTargetFrom(player.x, player.y, playerAttackTarget, attackReach)) {
+            clearPlayerPath();
+            if (attackCooldown <= 0.0) {
+                attackWithCurrentWeapon();
+            }
+            return false;
+        }
+
+        if (playerPathRefreshCooldown <= 0.0 || playerPath.isEmpty()) {
+            rebuildPlayerAttackPath(playerAttackTarget);
+        }
+
+        return followPlayerPath(dt, playerPathFinalX, playerPathFinalY);
+    }
+
+    private boolean followPlayerPath(double dt, double finalX, double finalY) {
+        while (!playerPath.isEmpty()) {
+            Point waypoint = playerPath.get(0);
+            double waypointX = map.tileCenter(waypoint.x);
+            double waypointY = map.tileCenter(waypoint.y);
+            if (distance(player.x, player.y, waypointX, waypointY) <= PLAYER_WAYPOINT_REACHED_DISTANCE) {
+                playerPath.remove(0);
+                continue;
+            }
+            return movePlayerTowards(dt, waypointX, waypointY);
+        }
+
+        if (distance(player.x, player.y, finalX, finalY) <= PLAYER_DESTINATION_REACHED_DISTANCE) {
+            return false;
+        }
+
+        return movePlayerTowards(dt, finalX, finalY);
+    }
+
+    private boolean movePlayerTowards(double dt, double targetX, double targetY) {
+        double dx = targetX - player.x;
+        double dy = targetY - player.y;
+        double len = Math.hypot(dx, dy);
+        if (len < 0.0001) {
+            return false;
+        }
+
+        double step = Math.min(PLAYER_MOVE_SPEED * dt, len);
+        double dirX = dx / len;
+        double dirY = dy / len;
+        player.aimAngle = Math.atan2(dirY, dirX);
+        return moveCombatUnit(player, dirX * step, dirY * step);
+    }
+
+    private void issueMoveOrder(double worldX, double worldY) {
+        clearPlayerOrders();
+        if (gameOver || player.hp <= 0) {
+            return;
+        }
+
+        double clampedX = clamp(worldX, player.radius, map.getPixelWidth() - player.radius);
+        double clampedY = clamp(worldY, player.radius, map.getPixelHeight() - player.radius);
+        Point goalTile = findNearestWalkableTileForPlayer(clampedX, clampedY);
+        if (goalTile == null) {
+            return;
+        }
+
+        PathSearchResult path = findPlayerPath(new TileGoal() {
+            @Override
+            public boolean isGoal(int tileX, int tileY) {
+                return tileX == goalTile.x && tileY == goalTile.y;
+            }
+
+            @Override
+            public double heuristic(int tileX, int tileY) {
+                return tileDistance(tileX, tileY, goalTile.x, goalTile.y);
+            }
+        });
+        if (path == null) {
+            return;
+        }
+
+        playerMoveOrderActive = true;
+        playerOrderX = canOccupy(player, clampedX, clampedY) ? clampedX : map.tileCenter(goalTile.x);
+        playerOrderY = canOccupy(player, clampedX, clampedY) ? clampedY : map.tileCenter(goalTile.y);
+        applyPlayerPath(path, playerOrderX, playerOrderY);
+    }
+
+    private void issueAttackOrder(Creep target) {
+        clearPlayerOrders();
+        if (gameOver || player.hp <= 0 || target == null || target.hp <= 0) {
+            return;
+        }
+
+        playerAttackTarget = target;
+        rebuildPlayerAttackPath(target);
+    }
+
+    private void rebuildPlayerAttackPath(Creep target) {
+        if (target == null || target.hp <= 0) {
+            clearPlayerOrders();
+            return;
+        }
+
+        double attackReach = playerAttackReach(target);
+        PathSearchResult path = findPlayerPath(new TileGoal() {
+            @Override
+            public boolean isGoal(int tileX, int tileY) {
+                double tileCenterX = map.tileCenter(tileX);
+                double tileCenterY = map.tileCenter(tileY);
+                return isTileWalkableForPlayer(tileX, tileY)
+                        && canPlayerAttackTargetFrom(tileCenterX, tileCenterY, target, attackReach);
+            }
+
+            @Override
+            public double heuristic(int tileX, int tileY) {
+                double dist = distance(map.tileCenter(tileX), map.tileCenter(tileY), target.x, target.y);
+                return Math.max(0.0, dist - attackReach) / map.getTileSize();
+            }
+        });
+
+        playerPathRefreshCooldown = PLAYER_PATH_REBUILD_INTERVAL;
+        if (path == null) {
+            clearPlayerPath();
+            return;
+        }
+
+        double goalX = map.tileCenter(path.goalTile().x);
+        double goalY = map.tileCenter(path.goalTile().y);
+        applyPlayerPath(path, goalX, goalY);
+    }
+
+    private void applyPlayerPath(PathSearchResult path, double finalX, double finalY) {
+        clearPlayerPath();
+        playerPath.addAll(path.tiles());
+        playerPathFinalX = finalX;
+        playerPathFinalY = finalY;
+    }
+
+    private void clearPlayerOrders() {
+        playerMoveOrderActive = false;
+        playerAttackTarget = null;
+        clearPlayerPath();
+    }
+
+    private void clearPlayerPath() {
+        playerPath.clear();
+        playerPathFinalX = player.x;
+        playerPathFinalY = player.y;
+        playerPathRefreshCooldown = 0.0;
+    }
+
+    private double playerAttackReach(CombatEntity target) {
+        if (currentWeapon.projectile()) {
+            return currentWeapon.projectileSpeed() * currentWeapon.projectileLife()
+                    + currentWeapon.projectileRadius()
+                    + target.getRadius();
+        }
+        return currentWeapon.meleeRange() + target.getRadius();
+    }
+
+    private boolean canPlayerAttackTargetFrom(double sourceX, double sourceY, CombatEntity target, double attackReach) {
+        if (distance(sourceX, sourceY, target.getX(), target.getY()) > attackReach) {
+            return false;
+        }
+        return !currentWeapon.projectile() || hasLineOfSight(sourceX, sourceY, target.getX(), target.getY());
+    }
+
+    private boolean hasLineOfSight(double startX, double startY, double endX, double endY) {
+        double dx = endX - startX;
+        double dy = endY - startY;
+        double totalDistance = Math.hypot(dx, dy);
+        if (totalDistance < 0.001) {
+            return true;
+        }
+
+        int steps = Math.max(1, (int) Math.ceil(totalDistance / 6.0));
+        for (int i = 1; i < steps; i++) {
+            double t = i / (double) steps;
+            if (map.isBlockedPixel(startX + dx * t, startY + dy * t)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private Point findNearestWalkableTileForPlayer(double worldX, double worldY) {
+        int targetTileX = clampTile((int) (worldX / map.getTileSize()), map.getWidth());
+        int targetTileY = clampTile((int) (worldY / map.getTileSize()), map.getHeight());
+        Point best = null;
+        double bestDistance = Double.MAX_VALUE;
+
+        for (int ty = 0; ty < map.getHeight(); ty++) {
+            for (int tx = 0; tx < map.getWidth(); tx++) {
+                if (!isTileWalkableForPlayer(tx, ty)) {
+                    continue;
+                }
+
+                double dist = tileDistance(tx, ty, targetTileX, targetTileY);
+                if (dist < bestDistance) {
+                    bestDistance = dist;
+                    best = new Point(tx, ty);
+                }
+            }
+        }
+
+        return best;
+    }
+
+    private PathSearchResult findPlayerPath(TileGoal goal) {
+        int startTileX = clampTile((int) (player.x / map.getTileSize()), map.getWidth());
+        int startTileY = clampTile((int) (player.y / map.getTileSize()), map.getHeight());
+        return findPath(
+                new Point(startTileX, startTileY),
+                goal,
+                this::isTileWalkableForPlayer
+        );
+    }
+
+    private PathSearchResult findPath(Point startTile, TileGoal goal, TileWalkability walkability) {
+        int width = map.getWidth();
+        int height = map.getHeight();
+        if (goal.isGoal(startTile.x, startTile.y)) {
+            return new PathSearchResult(Collections.emptyList(), new Point(startTile.x, startTile.y));
+        }
+
+        int totalTiles = width * height;
+        double[] cost = new double[totalTiles];
+        int[] parent = new int[totalTiles];
+        boolean[] closed = new boolean[totalTiles];
+        Arrays.fill(cost, Double.POSITIVE_INFINITY);
+        Arrays.fill(parent, -1);
+
+        PriorityQueue<PathNode> open = new PriorityQueue<>(Comparator.comparingDouble(PathNode::priority));
+        int startIndex = tileIndex(startTile.x, startTile.y);
+        cost[startIndex] = 0.0;
+        open.add(new PathNode(startTile.x, startTile.y, goal.heuristic(startTile.x, startTile.y)));
+
+        int[][] directions = {
+                {-1, -1}, {0, -1}, {1, -1},
+                {-1, 0},           {1, 0},
+                {-1, 1},  {0, 1},  {1, 1}
+        };
+
+        while (!open.isEmpty()) {
+            PathNode current = open.poll();
+            int currentIndex = tileIndex(current.tileX(), current.tileY());
+            if (closed[currentIndex]) {
+                continue;
+            }
+            closed[currentIndex] = true;
+
+            if (goal.isGoal(current.tileX(), current.tileY())) {
+                return new PathSearchResult(
+                        reconstructPath(parent, currentIndex, startIndex, width),
+                        new Point(current.tileX(), current.tileY())
+                );
+            }
+
+            for (int[] direction : directions) {
+                int nextX = current.tileX() + direction[0];
+                int nextY = current.tileY() + direction[1];
+                if (!walkability.isWalkable(nextX, nextY)) {
+                    continue;
+                }
+                if (direction[0] != 0 && direction[1] != 0
+                        && (!walkability.isWalkable(current.tileX() + direction[0], current.tileY())
+                        || !walkability.isWalkable(current.tileX(), current.tileY() + direction[1]))) {
+                    continue;
+                }
+
+                int nextIndex = tileIndex(nextX, nextY);
+                if (closed[nextIndex]) {
+                    continue;
+                }
+
+                double stepCost = direction[0] != 0 && direction[1] != 0 ? Math.sqrt(2.0) : 1.0;
+                double tentativeCost = cost[currentIndex] + stepCost;
+                if (tentativeCost >= cost[nextIndex]) {
+                    continue;
+                }
+
+                cost[nextIndex] = tentativeCost;
+                parent[nextIndex] = currentIndex;
+                open.add(new PathNode(nextX, nextY, tentativeCost + goal.heuristic(nextX, nextY)));
+            }
+        }
+
+        return null;
+    }
+
+    private List<Point> reconstructPath(int[] parent, int goalIndex, int startIndex, int width) {
+        List<Point> path = new ArrayList<>();
+        int current = goalIndex;
+        while (current != startIndex && current >= 0) {
+            int tileX = current % width;
+            int tileY = current / width;
+            path.add(new Point(tileX, tileY));
+            current = parent[current];
+        }
+        Collections.reverse(path);
+        return path;
+    }
+
+    private boolean isTileWalkableForPlayer(int tileX, int tileY) {
+        if (!map.inBounds(tileX, tileY)) {
+            return false;
+        }
+        return canOccupy(player, map.tileCenter(tileX), map.tileCenter(tileY));
+    }
+
+    private int tileIndex(int tileX, int tileY) {
+        return tileY * map.getWidth() + tileX;
+    }
+
+    private int clampTile(int tile, int limit) {
+        return Math.max(0, Math.min(limit - 1, tile));
+    }
+
+    private double tileDistance(int tileX1, int tileY1, int tileX2, int tileY2) {
+        return Math.hypot(tileX1 - tileX2, tileY1 - tileY2);
     }
 
     private void respawnHero(Player hero) {
@@ -478,6 +864,9 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
         hero.attackAnimationTimer = 0.0;
         hero.state = AnimationState.IDLE;
         hero.animPhase = 0.0;
+        if (hero == player) {
+            clearPlayerOrders();
+        }
     }
 
     private void attackWithCurrentWeapon() {
@@ -639,6 +1028,7 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
 
             creep.attackTimer = Math.max(0.0, creep.attackTimer - dt);
             creep.attackAnimationTimer = Math.max(0.0, creep.attackAnimationTimer - dt);
+            creep.laneRepathCooldown = Math.max(0.0, creep.laneRepathCooldown - dt);
 
             Creep enemyCreep = findNearestEnemyLaneCreep(creep, 130.0);
             if (enemyCreep != null) {
@@ -724,12 +1114,13 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
 
         if (distance(creep.x, creep.y, tx, ty) < 10.0 && creep.waypointIndex < path.size() - 1) {
             creep.waypointIndex++;
+            clearCreepLanePath(creep);
             targetPoint = path.get(creep.waypointIndex);
             tx = map.tileCenter(targetPoint.x);
             ty = map.tileCenter(targetPoint.y);
         }
 
-        moveTowards(creep, tx, ty, creep.moveSpeed * dt);
+        followLanePath(creep, dt, targetPoint, tx, ty);
     }
 
     private void moveTowards(Creep creep, double tx, double ty, double distanceStep) {
@@ -746,6 +1137,96 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
         double dirY = dy / len;
         creep.lookAngle = Math.atan2(dirY, dirX);
         creep.moving = moveCombatUnit(creep, dirX * step, dirY * step);
+    }
+
+    private void followLanePath(Creep creep, double dt, Point goalTile, double goalX, double goalY) {
+        if (creep.laneNavigationGoalIndex != creep.waypointIndex
+                || creep.laneNavigationPath.isEmpty()
+                || creep.laneRepathCooldown <= 0.0) {
+            rebuildCreepLanePath(creep, goalTile);
+        }
+
+        while (!creep.laneNavigationPath.isEmpty()) {
+            Point waypoint = creep.laneNavigationPath.get(0);
+            double waypointX = map.tileCenter(waypoint.x);
+            double waypointY = map.tileCenter(waypoint.y);
+            if (distance(creep.x, creep.y, waypointX, waypointY) <= CREEP_WAYPOINT_REACHED_DISTANCE) {
+                creep.laneNavigationPath.remove(0);
+                continue;
+            }
+
+            moveTowards(creep, waypointX, waypointY, creep.moveSpeed * dt);
+            return;
+        }
+
+        moveTowards(creep, goalX, goalY, creep.moveSpeed * dt);
+    }
+
+    private void rebuildCreepLanePath(Creep creep, Point goalTile) {
+        Point startTile = findNearestLaneTile(creep.x, creep.y, creep.lane);
+        if (startTile == null) {
+            clearCreepLanePath(creep);
+            return;
+        }
+
+        PathSearchResult path = findPath(
+                startTile,
+                new TileGoal() {
+                    @Override
+                    public boolean isGoal(int tileX, int tileY) {
+                        return tileX == goalTile.x && tileY == goalTile.y;
+                    }
+
+                    @Override
+                    public double heuristic(int tileX, int tileY) {
+                        return tileDistance(tileX, tileY, goalTile.x, goalTile.y);
+                    }
+                },
+                (tileX, tileY) -> isLaneTileWalkableForCreep(creep, tileX, tileY)
+        );
+
+        creep.laneNavigationPath.clear();
+        creep.laneNavigationGoalIndex = creep.waypointIndex;
+        creep.laneRepathCooldown = CREEP_PATH_REBUILD_INTERVAL;
+        if (path == null) {
+            return;
+        }
+
+        creep.laneNavigationPath.addAll(path.tiles());
+    }
+
+    private void clearCreepLanePath(Creep creep) {
+        creep.laneNavigationPath.clear();
+        creep.laneNavigationGoalIndex = -1;
+        creep.laneRepathCooldown = 0.0;
+    }
+
+    private Point findNearestLaneTile(double worldX, double worldY, LaneType laneType) {
+        Point best = null;
+        double bestDistance = Double.MAX_VALUE;
+
+        for (int ty = 0; ty < map.getHeight(); ty++) {
+            for (int tx = 0; tx < map.getWidth(); tx++) {
+                if (!map.hasLaneType(tx, ty, laneType)) {
+                    continue;
+                }
+
+                double dist = distance(worldX, worldY, map.tileCenter(tx), map.tileCenter(ty));
+                if (dist < bestDistance) {
+                    bestDistance = dist;
+                    best = new Point(tx, ty);
+                }
+            }
+        }
+
+        return best;
+    }
+
+    private boolean isLaneTileWalkableForCreep(Creep creep, int tileX, int tileY) {
+        if (!map.inBounds(tileX, tileY) || !map.hasLaneType(tileX, tileY, creep.lane)) {
+            return false;
+        }
+        return canOccupy(creep, map.tileCenter(tileX), map.tileCenter(tileY));
     }
 
     private void updateNeutralCreeps(double dt) {
@@ -971,6 +1452,9 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
             hero.attackAnimationTimer = 0.0;
             hero.state = AnimationState.DEAD;
             hero.animPhase = 0.0;
+            if (hero == player) {
+                clearPlayerOrders();
+            }
         }
     }
 
@@ -1193,6 +1677,37 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
         return bestHero;
     }
 
+    private Creep findClickedHostileCreep(double worldX, double worldY) {
+        Creep target = null;
+        double bestDistance = Double.MAX_VALUE;
+
+        for (Creep creep : laneCreeps) {
+            if (!isHostileCreep(creep)) {
+                continue;
+            }
+
+            double dist = distance(worldX, worldY, creep.x, creep.y);
+            if (dist <= creep.radius + CLICK_TARGET_PADDING && dist < bestDistance) {
+                bestDistance = dist;
+                target = creep;
+            }
+        }
+
+        for (Creep creep : neutralCreeps) {
+            if (!isHostileCreep(creep)) {
+                continue;
+            }
+
+            double dist = distance(worldX, worldY, creep.x, creep.y);
+            if (dist <= creep.radius + CLICK_TARGET_PADDING && dist < bestDistance) {
+                bestDistance = dist;
+                target = creep;
+            }
+        }
+
+        return target;
+    }
+
     private boolean isHostileHero(Player hero) {
         return hero != player && hero.hp > 0 && hero.team != player.team;
     }
@@ -1212,6 +1727,7 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
 
         currentWeapon = weapon;
         attackCooldown = Math.min(attackCooldown, 0.12);
+        playerPathRefreshCooldown = 0.0;
     }
 
     private void triggerAbility(AbilitySlot slot) {
@@ -1258,17 +1774,90 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
 
     private boolean canOccupy(CombatEntity entity, double x, double y) {
         double radius = entity.getRadius();
-        return !map.isBlockedPixel(x - radius, y - radius)
+        boolean freeFromTerrain = !map.isBlockedPixel(x - radius, y - radius)
                 && !map.isBlockedPixel(x + radius, y - radius)
                 && !map.isBlockedPixel(x - radius, y + radius)
                 && !map.isBlockedPixel(x + radius, y + radius);
+        if (!freeFromTerrain) {
+            return false;
+        }
+
+        for (Structure structure : structures) {
+            if (structure == entity || structure.hp <= 0) {
+                continue;
+            }
+            if (distance(x, y, structure.x, structure.y) < radius + structure.radius) {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     private void centerCameraOnPlayer() {
-        double visibleWorldW = getWidth() / ZOOM;
-        double visibleWorldH = getHeight() / ZOOM;
+        double visibleWorldW = viewportWidth() / ZOOM;
+        double visibleWorldH = viewportHeight() / ZOOM;
         cameraX = clamp(player.x - visibleWorldW / 2.0, 0.0, Math.max(0.0, map.getPixelWidth() - visibleWorldW));
         cameraY = clamp(player.y - visibleWorldH / 2.0, 0.0, Math.max(0.0, map.getPixelHeight() - visibleWorldH));
+    }
+
+    private void updateCamera(double dt) {
+        double velocityX = 0.0;
+        double velocityY = 0.0;
+
+        double inputX = 0.0;
+        double inputY = 0.0;
+        if (cameraUp) inputY -= 1.0;
+        if (cameraDown) inputY += 1.0;
+        if (cameraLeft) inputX -= 1.0;
+        if (cameraRight) inputX += 1.0;
+
+        if (inputX != 0.0 || inputY != 0.0) {
+            double len = Math.hypot(inputX, inputY);
+            velocityX += inputX / len * CAMERA_MOVE_SPEED;
+            velocityY += inputY / len * CAMERA_MOVE_SPEED;
+        }
+
+        if (mouseInsideWindow && !middleMouseDragging) {
+            double edgeX = 0.0;
+            double edgeY = 0.0;
+            int width = viewportWidth();
+            int height = viewportHeight();
+            if (mouseX <= CAMERA_EDGE_SCROLL_MARGIN) edgeX -= 1.0;
+            if (mouseX >= width - CAMERA_EDGE_SCROLL_MARGIN) edgeX += 1.0;
+            if (mouseY <= CAMERA_EDGE_SCROLL_MARGIN) edgeY -= 1.0;
+            if (mouseY >= height - CAMERA_EDGE_SCROLL_MARGIN) edgeY += 1.0;
+
+            if (edgeX != 0.0 || edgeY != 0.0) {
+                double len = Math.hypot(edgeX, edgeY);
+                velocityX += edgeX / len * CAMERA_EDGE_MOVE_SPEED;
+                velocityY += edgeY / len * CAMERA_EDGE_MOVE_SPEED;
+            }
+        }
+
+        if (velocityX == 0.0 && velocityY == 0.0) {
+            return;
+        }
+
+        double visibleWorldW = viewportWidth() / ZOOM;
+        double visibleWorldH = viewportHeight() / ZOOM;
+        cameraX = clamp(cameraX + velocityX * dt, 0.0, Math.max(0.0, map.getPixelWidth() - visibleWorldW));
+        cameraY = clamp(cameraY + velocityY * dt, 0.0, Math.max(0.0, map.getPixelHeight() - visibleWorldH));
+    }
+
+    private void panCameraByScreenDelta(int deltaX, int deltaY) {
+        double visibleWorldW = viewportWidth() / ZOOM;
+        double visibleWorldH = viewportHeight() / ZOOM;
+        cameraX = clamp(cameraX - deltaX / ZOOM, 0.0, Math.max(0.0, map.getPixelWidth() - visibleWorldW));
+        cameraY = clamp(cameraY - deltaY / ZOOM, 0.0, Math.max(0.0, map.getPixelHeight() - visibleWorldH));
+    }
+
+    private int viewportWidth() {
+        return getWidth() > 0 ? getWidth() : GameConfig.VIEW_W;
+    }
+
+    private int viewportHeight() {
+        return getHeight() > 0 ? getHeight() : GameConfig.VIEW_H;
     }
 
     private int detectTargetFps() {
@@ -1850,10 +2439,14 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
     @Override
     public void keyPressed(KeyEvent e) {
         switch (e.getKeyCode()) {
-            case KeyEvent.VK_W, KeyEvent.VK_UP -> up = true;
-            case KeyEvent.VK_S, KeyEvent.VK_DOWN -> down = true;
-            case KeyEvent.VK_A, KeyEvent.VK_LEFT -> left = true;
-            case KeyEvent.VK_D, KeyEvent.VK_RIGHT -> right = true;
+            case KeyEvent.VK_W -> up = true;
+            case KeyEvent.VK_S -> down = true;
+            case KeyEvent.VK_A -> left = true;
+            case KeyEvent.VK_D -> right = true;
+            case KeyEvent.VK_UP -> cameraUp = true;
+            case KeyEvent.VK_DOWN -> cameraDown = true;
+            case KeyEvent.VK_LEFT -> cameraLeft = true;
+            case KeyEvent.VK_RIGHT -> cameraRight = true;
             case KeyEvent.VK_1 -> switchWeapon(WeaponType.STONE);
             case KeyEvent.VK_2 -> switchWeapon(WeaponType.BOW);
             case KeyEvent.VK_3 -> switchWeapon(WeaponType.SWORD);
@@ -1874,10 +2467,14 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
     @Override
     public void keyReleased(KeyEvent e) {
         switch (e.getKeyCode()) {
-            case KeyEvent.VK_W, KeyEvent.VK_UP -> up = false;
-            case KeyEvent.VK_S, KeyEvent.VK_DOWN -> down = false;
-            case KeyEvent.VK_A, KeyEvent.VK_LEFT -> left = false;
-            case KeyEvent.VK_D, KeyEvent.VK_RIGHT -> right = false;
+            case KeyEvent.VK_W -> up = false;
+            case KeyEvent.VK_S -> down = false;
+            case KeyEvent.VK_A -> left = false;
+            case KeyEvent.VK_D -> right = false;
+            case KeyEvent.VK_UP -> cameraUp = false;
+            case KeyEvent.VK_DOWN -> cameraDown = false;
+            case KeyEvent.VK_LEFT -> cameraLeft = false;
+            case KeyEvent.VK_RIGHT -> cameraRight = false;
             default -> {
             }
         }
@@ -1885,11 +2482,19 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
 
     @Override
     public void mouseDragged(MouseEvent e) {
+        if (middleMouseDragging) {
+            int deltaX = e.getX() - dragLastMouseX;
+            int deltaY = e.getY() - dragLastMouseY;
+            panCameraByScreenDelta(deltaX, deltaY);
+            dragLastMouseX = e.getX();
+            dragLastMouseY = e.getY();
+        }
         mouseMoved(e);
     }
 
     @Override
     public void mouseMoved(MouseEvent e) {
+        mouseInsideWindow = true;
         mouseX = e.getX();
         mouseY = e.getY();
     }
@@ -1903,28 +2508,58 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
         mouseMoved(e);
 
         if (e.getButton() == MouseEvent.BUTTON1) {
-            attackMouseDown = true;
+            double worldX = screenToWorldX(e.getX());
+            double worldY = screenToWorldY(e.getY());
+            Creep clickedCreep = findClickedHostileCreep(worldX, worldY);
+            if (clickedCreep != null) {
+                issueAttackOrder(clickedCreep);
+            } else {
+                issueMoveOrder(worldX, worldY);
+            }
+        } else if (e.getButton() == MouseEvent.BUTTON2) {
+            middleMouseDragging = true;
+            dragLastMouseX = e.getX();
+            dragLastMouseY = e.getY();
         }
     }
 
     @Override
     public void mouseReleased(MouseEvent e) {
-        if (e.getButton() == MouseEvent.BUTTON1) {
-            attackMouseDown = false;
+        if (e.getButton() == MouseEvent.BUTTON2) {
+            middleMouseDragging = false;
         }
     }
 
     @Override
     public void mouseEntered(MouseEvent e) {
+        mouseInsideWindow = true;
+        mouseMoved(e);
     }
 
     @Override
     public void mouseExited(MouseEvent e) {
+        mouseInsideWindow = false;
     }
 
     @Override
     public void removeNotify() {
         gameTimer.stop();
         super.removeNotify();
+    }
+
+    private interface TileGoal {
+        boolean isGoal(int tileX, int tileY);
+
+        double heuristic(int tileX, int tileY);
+    }
+
+    private interface TileWalkability {
+        boolean isWalkable(int tileX, int tileY);
+    }
+
+    private record PathNode(int tileX, int tileY, double priority) {
+    }
+
+    private record PathSearchResult(List<Point> tiles, Point goalTile) {
     }
 }

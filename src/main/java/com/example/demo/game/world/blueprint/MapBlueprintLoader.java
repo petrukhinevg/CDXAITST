@@ -92,6 +92,7 @@ public final class MapBlueprintLoader {
         PropElement[][] props = new PropElement[height][width];
         boolean[][] blocked = new boolean[height][width];
         boolean[][] lane = new boolean[height][width];
+        int[][] laneMask = new int[height][width];
 
         for (int y = 0; y < height; y++) {
             String[] cells = gridLines.get(y).split("\\s+");
@@ -105,10 +106,11 @@ public final class MapBlueprintLoader {
                 props[y][x] = tile.prop();
                 blocked[y][x] = tile.blocked();
                 lane[y][x] = tile.lane();
+                laneMask[y][x] = tile.laneMask();
             }
         }
 
-        return new MapBlueprint(width, height, ground, water, props, blocked, lane,
+        return new MapBlueprint(width, height, ground, water, props, blocked, lane, laneMask,
                 playerStart, lightThrone, darkThrone, lanePaths, towerTiles);
     }
 
@@ -118,7 +120,7 @@ public final class MapBlueprintLoader {
         WaterElement water = null;
         PropElement prop = null;
         boolean blocked = false;
-        boolean lane = false;
+        int laneMask = 0;
 
         for (String layer : layers) {
             switch (layer) {
@@ -132,7 +134,9 @@ public final class MapBlueprintLoader {
                     blocked = true;
                 }
                 case "rv1" -> water = MapElements.RIVER;
-                case "l1", "l2", "l3" -> lane = true;
+                case "l1" -> laneMask |= laneBit(LaneType.TOP);
+                case "l2" -> laneMask |= laneBit(LaneType.MID);
+                case "l3" -> laneMask |= laneBit(LaneType.BOT);
                 case "rk1" -> prop = MapElements.ROCK;
                 case "bh1" -> prop = MapElements.BUSH;
                 case "st1" -> prop = MapElements.STUMP;
@@ -145,7 +149,7 @@ public final class MapBlueprintLoader {
             throw new IllegalArgumentException("Tile must define a ground layer: " + token);
         }
 
-        return new TileLayers(ground, water, prop, blocked, lane);
+        return new TileLayers(ground, water, prop, blocked, laneMask != 0, laneMask);
     }
 
     private EnumMap<LaneType, List<Point>> initLaneMap() {
@@ -201,6 +205,15 @@ public final class MapBlueprintLoader {
                               WaterElement water,
                               PropElement prop,
                               boolean blocked,
-                              boolean lane) {
+                              boolean lane,
+                              int laneMask) {
+    }
+
+    private int laneBit(LaneType laneType) {
+        return switch (laneType) {
+            case TOP -> 1;
+            case MID -> 1 << 1;
+            case BOT -> 1 << 2;
+        };
     }
 }
