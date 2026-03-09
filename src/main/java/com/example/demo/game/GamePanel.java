@@ -9,12 +9,14 @@ import com.example.demo.game.model.CombatUnit;
 import com.example.demo.game.model.Creep;
 import com.example.demo.game.model.CreepRole;
 import com.example.demo.game.model.ExperienceOrb;
+import com.example.demo.game.model.HeroAbility;
 import com.example.demo.game.model.LaneType;
 import com.example.demo.game.model.Player;
 import com.example.demo.game.model.Structure;
 import com.example.demo.game.model.StructureType;
 import com.example.demo.game.model.Team;
 import com.example.demo.game.model.WeaponType;
+import com.example.demo.game.model.AbilitySlot;
 import com.example.demo.game.render.HudRenderer;
 import com.example.demo.game.render.MapRenderer;
 import com.example.demo.game.render.SpriteLibrary;
@@ -75,6 +77,7 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
     private final List<Creep> laneCreeps = new ArrayList<>();
     private final List<Creep> neutralCreeps = new ArrayList<>();
     private final List<Structure> structures = new ArrayList<>();
+    private final List<HeroAbility> heroAbilities = new ArrayList<>();
 
     private final EnumMap<Team, EnumMap<LaneType, List<Point>>> lanePaths = new EnumMap<>(Team.class);
 
@@ -85,8 +88,6 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
     private BufferedImage miniMapLayer;
 
     private WeaponType currentWeapon = WeaponType.STONE;
-    private int ammoInMagazine;
-    private double reloadTimer;
 
     private boolean up;
     private boolean down;
@@ -162,8 +163,7 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
         player.state = AnimationState.IDLE;
 
         currentWeapon = WeaponType.STONE;
-        ammoInMagazine = currentWeapon.magazineSize();
-        reloadTimer = 0.0;
+        initHeroAbilities();
 
         attackCooldown = 0.0;
         playerHitCooldown = 0.0;
@@ -288,12 +288,19 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
                 c.attackTimer = random.nextDouble() * 0.8;
                 c.homeX = campX;
                 c.homeY = campY;
-                c.leashRadius = 68.0;
-                c.aggroRadius = 84.0;
+                c.leashRadius = 132.0;
+                c.aggroRadius = 92.0;
                 c.lookAngle = random.nextDouble() * Math.PI * 2.0;
                 neutralCreeps.add(c);
             }
         }
+    }
+
+    private void initHeroAbilities() {
+        heroAbilities.clear();
+        heroAbilities.add(new HeroAbility(AbilitySlot.PRIMARY, "Навык I", 8.0, false));
+        heroAbilities.add(new HeroAbility(AbilitySlot.SECONDARY, "Навык II", 12.0, false));
+        heroAbilities.add(new HeroAbility(AbilitySlot.ULTIMATE, "Ультимейт", 40.0, true));
     }
 
     private void spawnLaneWave() {
@@ -374,11 +381,8 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
         player.attackTimer = Math.max(0.0, player.attackTimer - dt);
         player.attackAnimationTimer = Math.max(0.0, player.attackAnimationTimer - dt);
 
-        if (reloadTimer > 0.0) {
-            reloadTimer = Math.max(0.0, reloadTimer - dt);
-            if (reloadTimer == 0.0) {
-                ammoInMagazine = currentWeapon.magazineSize();
-            }
+        for (HeroAbility ability : heroAbilities) {
+            ability.tick(dt);
         }
 
         laneWaveTimer -= dt;
@@ -463,16 +467,6 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
     }
 
     private void attackWithCurrentWeapon() {
-        if (reloadTimer > 0.0) {
-            return;
-        }
-
-        if (ammoInMagazine <= 0) {
-            startReload();
-            return;
-        }
-
-        ammoInMagazine--;
         player.attackTimer = currentWeapon.attackAnimationTime();
         player.attackAnimationTimer = currentWeapon.attackAnimationTime();
         player.animPhase = 0.0;
@@ -484,10 +478,6 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
         } else {
             performMeleeAttack(currentWeapon);
             swordSwingTime = 0.10;
-        }
-
-        if (ammoInMagazine <= 0) {
-            startReload();
         }
     }
 
@@ -736,14 +726,22 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
             creep.attackAnimationTimer = Math.max(0.0, creep.attackAnimationTimer - dt);
 
             double distToHome = distance(creep.x, creep.y, creep.homeX, creep.homeY);
+            double heroHomeDist = gameOver ? Double.MAX_VALUE : distance(player.x, player.y, creep.homeX, creep.homeY);
+            if (creep.aggroedToHero && (gameOver || player.hp <= 0 || heroHomeDist > creep.leashRadius + 8.0)) {
+                creep.aggroedToHero = false;
+            }
+            if (!creep.aggroedToHero && heroHomeDist <= creep.aggroRadius) {
+                creep.aggroedToHero = true;
+            }
+
             if (distToHome > creep.leashRadius) {
+                creep.aggroedToHero = false;
                 moveTowards(creep, creep.homeX, creep.homeY, creep.moveSpeed * dt);
                 updateCreepAnimation(creep, dt);
                 continue;
             }
 
-            boolean heroNearCamp = !gameOver && distance(player.x, player.y, creep.homeX, creep.homeY) <= creep.aggroRadius;
-            if (heroNearCamp) {
+            if (creep.aggroedToHero && !gameOver) {
                 engageHeroTarget(creep, dt);
                 updateCreepAnimation(creep, dt);
                 continue;
@@ -1071,22 +1069,35 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
         return structure.hp > 0 && structure.team == Team.DARK;
     }
 
-    private void startReload() {
-        if (reloadTimer > 0.0 || ammoInMagazine == currentWeapon.magazineSize()) {
-            return;
-        }
-        reloadTimer = currentWeapon.reloadSeconds();
-    }
-
     private void switchWeapon(WeaponType weapon) {
         if (currentWeapon == weapon) {
             return;
         }
 
         currentWeapon = weapon;
-        ammoInMagazine = currentWeapon.magazineSize();
-        reloadTimer = 0.0;
         attackCooldown = Math.min(attackCooldown, 0.12);
+    }
+
+    private void triggerAbility(AbilitySlot slot) {
+        if (gameOver) {
+            return;
+        }
+
+        HeroAbility ability = findAbility(slot);
+        if (ability == null || !ability.isReady()) {
+            return;
+        }
+
+        ability.triggerPlaceholder();
+    }
+
+    private HeroAbility findAbility(AbilitySlot slot) {
+        for (HeroAbility ability : heroAbilities) {
+            if (ability.slot() == slot) {
+                return ability;
+            }
+        }
+        return null;
     }
 
     private boolean moveCombatUnit(CombatUnit unit, double deltaX, double deltaY) {
@@ -1642,8 +1653,7 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
                 ZOOM,
                 player,
                 currentWeapon,
-                ammoInMagazine,
-                reloadTimer,
+                heroAbilities,
                 lightThrone,
                 darkThrone,
                 laneCreeps.size(),
@@ -1677,11 +1687,13 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
             case KeyEvent.VK_1 -> switchWeapon(WeaponType.STONE);
             case KeyEvent.VK_2 -> switchWeapon(WeaponType.BOW);
             case KeyEvent.VK_3 -> switchWeapon(WeaponType.SWORD);
+            case KeyEvent.VK_Q -> triggerAbility(AbilitySlot.PRIMARY);
+            case KeyEvent.VK_E -> triggerAbility(AbilitySlot.SECONDARY);
             case KeyEvent.VK_R -> {
                 if (gameOver) {
                     resetGame();
                 } else {
-                    startReload();
+                    triggerAbility(AbilitySlot.ULTIMATE);
                 }
             }
             default -> {

@@ -1,6 +1,7 @@
 package com.example.demo.game.render;
 
 import com.example.demo.game.model.Creep;
+import com.example.demo.game.model.HeroAbility;
 import com.example.demo.game.model.Player;
 import com.example.demo.game.model.Structure;
 import com.example.demo.game.model.StructureType;
@@ -24,8 +25,7 @@ public final class HudRenderer {
                         double zoom,
                         Player player,
                         WeaponType currentWeapon,
-                        int ammoInMagazine,
-                        double reloadTimer,
+                        List<HeroAbility> abilities,
                         Structure lightThrone,
                         Structure darkThrone,
                         int laneCreepCount,
@@ -94,32 +94,30 @@ public final class HudRenderer {
 
     private void drawProgressPanel(Graphics2D g2, Model model) {
         int panelX = 16;
-        int panelY = model.panelHeight() - 126;
-        drawPanel(g2, panelX, panelY, 320, 110);
+        int panelY = model.panelHeight() - 164;
+        drawPanel(g2, panelX, panelY, 344, 148);
 
         g2.setColor(Color.WHITE);
         g2.setFont(new Font("SansSerif", Font.BOLD, 16));
         g2.drawString("Прогресс", panelX + 14, panelY + 24);
         g2.setFont(new Font("SansSerif", Font.PLAIN, 13));
 
-        double reloadRatio = model.currentWeapon().reloadSeconds() == 0.0
-                ? 1.0
-                : 1.0 - model.reloadTimer() / model.currentWeapon().reloadSeconds();
-        if (model.reloadTimer() > 0.0) {
-            g2.drawString("Перезарядка", panelX + 14, panelY + 48);
-            drawBar(g2, panelX + 112, panelY + 38, 188, 11, reloadRatio,
-                    new Color(255, 206, 109), new Color(92, 74, 39), new Color(190, 190, 190));
-        } else {
-            g2.drawString("Боезапас: " + model.ammoInMagazine() + " / " + model.currentWeapon().magazineSize(), panelX + 14, panelY + 48);
-            drawBar(g2, panelX + 168, panelY + 38, 132, 11,
-                    model.currentWeapon().magazineSize() == 0 ? 0.0 : (double) model.ammoInMagazine() / model.currentWeapon().magazineSize(),
-                    new Color(245, 220, 143), new Color(92, 74, 39), new Color(190, 190, 190));
-        }
+        g2.drawString("Оружие: " + model.currentWeapon().displayName(), panelX + 14, panelY + 48);
 
         g2.drawString("XP: " + model.player().xp + " / " + model.player().xpToNextLevel, panelX + 14, panelY + 74);
-        drawBar(g2, panelX + 14, panelY + 82, 286, 12,
+        drawBar(g2, panelX + 14, panelY + 82, 314, 12,
                 model.player().xpToNextLevel == 0 ? 0.0 : (double) model.player().xp / model.player().xpToNextLevel,
                 new Color(91, 190, 255), new Color(31, 67, 93), new Color(190, 190, 190));
+
+        g2.setFont(new Font("SansSerif", Font.PLAIN, 12));
+        int abilityX = panelX + 14;
+        int abilityY = panelY + 104;
+        int abilityW = 98;
+        int abilityH = 28;
+        for (HeroAbility ability : model.abilities()) {
+            drawAbilitySlot(g2, abilityX, abilityY, abilityW, abilityH, ability);
+            abilityX += abilityW + 10;
+        }
     }
 
     private void drawMetaPanel(Graphics2D g2, Model model) {
@@ -138,10 +136,10 @@ public final class HudRenderer {
         g2.drawString("Фраги героя: " + model.kills(), panelX + 14, panelY + 84);
         g2.drawString("FPS: " + model.currentFps() + " / " + model.targetFps(), panelX + 14, panelY + 102);
 
-        g2.drawString("1 Камень  2 Лук  3 Меч", panelX + 144, panelY + 48);
-        g2.drawString("WASD движение", panelX + 144, panelY + 66);
-        g2.drawString("ЛКМ атака", panelX + 144, panelY + 84);
-        g2.drawString("R перезарядка", panelX + 144, panelY + 102);
+        g2.drawString("1 Камень  2 Лук  3 Меч", panelX + 132, panelY + 48);
+        g2.drawString("WASD движение", panelX + 132, panelY + 66);
+        g2.drawString("ЛКМ атака", panelX + 132, panelY + 84);
+        g2.drawString("Q / E / R способности", panelX + 132, panelY + 102);
     }
 
     private void drawMiniMap(Graphics2D g2, Model model) {
@@ -236,5 +234,37 @@ public final class HudRenderer {
         g2.fillRoundRect(x, y, width, height, 12, 12);
         g2.setColor(new Color(230, 230, 230, 120));
         g2.drawRoundRect(x, y, width, height, 12, 12);
+    }
+
+    private void drawAbilitySlot(Graphics2D g2, int x, int y, int width, int height, HeroAbility ability) {
+        Color fill = ability.ultimate()
+                ? new Color(130, 82, 40, 205)
+                : new Color(38, 70, 88, 205);
+        if (!ability.isReady()) {
+            fill = ability.ultimate()
+                    ? new Color(78, 54, 30, 205)
+                    : new Color(28, 42, 54, 205);
+        }
+
+        g2.setColor(fill);
+        g2.fillRoundRect(x, y, width, height, 10, 10);
+        g2.setColor(new Color(225, 225, 225, 130));
+        g2.drawRoundRect(x, y, width, height, 10, 10);
+
+        g2.setColor(Color.WHITE);
+        g2.drawString(ability.slot().keyLabel(), x + 8, y + 18);
+
+        String name = ability.displayName();
+        int maxLen = 11;
+        if (name.length() > maxLen) {
+            name = name.substring(0, maxLen - 1) + "…";
+        }
+        g2.drawString(name, x + 28, y + 18);
+
+        String stateText = ability.isReady()
+                ? "готово"
+                : String.format("%.0fs", Math.ceil(ability.remainingCooldown()));
+        int stateW = g2.getFontMetrics().stringWidth(stateText);
+        g2.drawString(stateText, x + width - stateW - 8, y + 18);
     }
 }

@@ -1,15 +1,13 @@
 package com.example.demo.game.model;
 
 public enum WeaponType {
-    STONE("Камень", 4, 0.20, 14, 1.00, true, 430.0, 1.15, 4.5, 0xFFCDB27A, 0.0, 0.0, 0.14),
-    BOW("Лук", 6, 0.30, 10, 1.20, true, 650.0, 1.40, 3.2, 0xFFE7D2A2, 0.0, 0.0, 0.18),
-    SWORD("Меч", 9, 0.40, 8, 1.15, false, 0.0, 0.0, 0.0, 0x00000000, 62.0, 100.0, 0.20);
+    STONE("Камень", 4, 0.20, true, 430.0, 1.15, 4.5, 0xFFCDB27A, 0.0, 0.0, 0.14),
+    BOW("Лук", 6, 0.30, true, 650.0, 1.40, 3.2, 0xFFE7D2A2, 0.0, 0.0, 0.18),
+    SWORD("Меч", 9, 0.40, false, 0.0, 0.0, 0.0, 0x00000000, 62.0, 100.0, 0.20);
 
     private final String displayName;
     private final int damage;
     private final double cooldown;
-    private final int magazineSize;
-    private final double reloadSeconds;
     private final boolean projectile;
     private final double projectileSpeed;
     private final double projectileLife;
@@ -22,8 +20,6 @@ public enum WeaponType {
     WeaponType(String displayName,
                int damage,
                double cooldown,
-               int magazineSize,
-               double reloadSeconds,
                boolean projectile,
                double projectileSpeed,
                double projectileLife,
@@ -35,8 +31,6 @@ public enum WeaponType {
         this.displayName = displayName;
         this.damage = damage;
         this.cooldown = cooldown;
-        this.magazineSize = magazineSize;
-        this.reloadSeconds = reloadSeconds;
         this.projectile = projectile;
         this.projectileSpeed = projectileSpeed;
         this.projectileLife = projectileLife;
@@ -57,14 +51,6 @@ public enum WeaponType {
 
     public double cooldown() {
         return cooldown;
-    }
-
-    public int magazineSize() {
-        return magazineSize;
-    }
-
-    public double reloadSeconds() {
-        return reloadSeconds;
     }
 
     public boolean projectile() {
