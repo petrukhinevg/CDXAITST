@@ -1,5 +1,6 @@
 package com.example.demo.game;
 
+import com.example.demo.game.collision.UnitCollisionResolver;
 import com.example.demo.game.config.GameConfig;
 import com.example.demo.game.model.AnimationState;
 import com.example.demo.game.model.Bullet;
@@ -52,6 +53,7 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
     private final Random random = new Random();
 
     private final GameMap map = new GameMap();
+    private final UnitCollisionResolver unitCollisionResolver = new UnitCollisionResolver();
     private final MapGenerator mapGenerator = new MapGenerator();
     private final HudRenderer hudRenderer = new HudRenderer();
     private final MapRenderer mapRenderer = new MapRenderer();
@@ -788,14 +790,7 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
         }
         addLivingUnits(units, laneCreeps);
         addLivingUnits(units, neutralCreeps);
-
-        for (int pass = 0; pass < 2; pass++) {
-            for (int i = 0; i < units.size(); i++) {
-                for (int j = i + 1; j < units.size(); j++) {
-                    separateUnits(units.get(i), units.get(j));
-                }
-            }
-        }
+        unitCollisionResolver.resolve(units, this::tryMoveCombatUnit);
     }
 
     private void addLivingUnits(List<CombatUnit> units, List<Creep> creeps) {
@@ -803,36 +798,6 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
             if (creep.hp > 0) {
                 units.add(creep);
             }
-        }
-    }
-
-    private void separateUnits(CombatUnit a, CombatUnit b) {
-        double dx = b.getX() - a.getX();
-        double dy = b.getY() - a.getY();
-        double dist = Math.hypot(dx, dy);
-        double minDist = a.getRadius() + b.getRadius();
-        if (dist >= minDist) {
-            return;
-        }
-
-        if (dist < 0.0001) {
-            dx = 1.0;
-            dy = 0.0;
-            dist = 1.0;
-        }
-
-        double overlap = minDist - dist;
-        double nx = dx / dist;
-        double ny = dy / dist;
-
-        boolean movedA = tryMoveCombatUnit(a, a.getX() - nx * overlap * 0.5, a.getY() - ny * overlap * 0.5);
-        boolean movedB = tryMoveCombatUnit(b, b.getX() + nx * overlap * 0.5, b.getY() + ny * overlap * 0.5);
-
-        if (!movedA) {
-            tryMoveCombatUnit(b, b.getX() + nx * overlap, b.getY() + ny * overlap);
-        }
-        if (!movedB) {
-            tryMoveCombatUnit(a, a.getX() - nx * overlap, a.getY() - ny * overlap);
         }
     }
 
