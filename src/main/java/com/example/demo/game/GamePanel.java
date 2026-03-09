@@ -28,6 +28,7 @@ import java.awt.BasicStroke;
 import java.awt.Color;
 import java.awt.Dimension;
 import java.awt.DisplayMode;
+import java.awt.Font;
 import java.awt.Graphics;
 import java.awt.Graphics2D;
 import java.awt.GraphicsEnvironment;
@@ -1118,6 +1119,7 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
         drawExperienceOrbs(g2);
         drawBullets(g2);
         drawPlayer(g2);
+        drawHeroOverheadHud(g2);
         hudRenderer.draw(g2, buildHudModel());
     }
 
@@ -1233,6 +1235,38 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
         if (player.state != AnimationState.DEAD) {
             drawHeldWeapon(g2, px, py);
         }
+    }
+
+    private void drawHeroOverheadHud(Graphics2D g2) {
+        if (gameOver || player.hp <= 0) {
+            return;
+        }
+
+        int px = worldToScreenX(player.x);
+        int py = worldToScreenY(player.y);
+        int topY = py - (int) Math.round(40 * ZOOM);
+
+        g2.setColor(new Color(0, 0, 0, 125));
+        g2.fillRoundRect(px - 58, topY - 20, 116, 34, 12, 12);
+
+        g2.setColor(new Color(28, 34, 42, 220));
+        g2.fillOval(px - 58, topY - 18, 24, 24);
+        g2.setColor(new Color(230, 230, 230, 180));
+        g2.drawOval(px - 58, topY - 18, 24, 24);
+        g2.setColor(Color.WHITE);
+        g2.setFont(new Font("SansSerif", Font.BOLD, 13));
+        String levelText = String.valueOf(player.level);
+        int levelW = g2.getFontMetrics().stringWidth(levelText);
+        g2.drawString(levelText, px - 46 - levelW / 2, topY - 2);
+
+        g2.setFont(new Font("SansSerif", Font.BOLD, 12));
+        String weaponText = currentWeapon.displayName();
+        int weaponW = g2.getFontMetrics().stringWidth(weaponText);
+        g2.drawString(weaponText, px - weaponW / 2, topY - 6);
+
+        drawHealthBar(g2, px + 8, topY + 7, 86, 8,
+                player.maxHp == 0 ? 0.0 : (double) player.hp / player.maxHp,
+                new Color(223, 79, 77));
     }
 
     private void drawHeldWeapon(Graphics2D g2, int px, int py) {

@@ -60,65 +60,9 @@ public final class HudRenderer {
     }
 
     public void draw(Graphics2D g2, Model model) {
-        g2.setColor(new Color(0, 0, 0, 145));
-        g2.fillRoundRect(16, 16, 640, 302, 12, 12);
-
-        g2.setColor(Color.WHITE);
-        g2.setFont(new Font("SansSerif", Font.BOLD, 18));
-        g2.drawString("Силы света (герой)", 30, 42);
-        g2.drawString("Оружие: " + model.currentWeapon().displayName(), 30, 116);
-        g2.drawString("Уровень: " + model.player().level, 30, 178);
-
-        drawBar(g2, 30, 50, 300, 14,
-                model.player().maxHp == 0 ? 0.0 : (double) model.player().hp / model.player().maxHp,
-                new Color(223, 79, 77), new Color(75, 33, 32), new Color(205, 205, 205));
-        g2.setFont(new Font("SansSerif", Font.PLAIN, 13));
-        g2.drawString(Math.max(0, model.player().hp) + " / " + model.player().maxHp, 344, 62);
-
-        double reloadRatio = model.currentWeapon().reloadSeconds() == 0.0
-                ? 1.0
-                : 1.0 - model.reloadTimer() / model.currentWeapon().reloadSeconds();
-        if (model.reloadTimer() > 0.0) {
-            g2.drawString("Перезарядка...", 30, 137);
-            drawBar(g2, 138, 125, 192, 11, reloadRatio,
-                    new Color(255, 206, 109), new Color(92, 74, 39), new Color(190, 190, 190));
-        } else {
-            g2.drawString("Магазин: " + model.ammoInMagazine() + " / " + model.currentWeapon().magazineSize(), 30, 137);
-            drawBar(g2, 198, 125, 132, 11,
-                    model.currentWeapon().magazineSize() == 0 ? 0.0 : (double) model.ammoInMagazine() / model.currentWeapon().magazineSize(),
-                    new Color(245, 220, 143), new Color(92, 74, 39), new Color(190, 190, 190));
-        }
-
-        g2.drawString("XP: " + model.player().xp + " / " + model.player().xpToNextLevel, 30, 200);
-        drawBar(g2, 30, 208, 300, 12,
-                model.player().xpToNextLevel == 0 ? 0.0 : (double) model.player().xp / model.player().xpToNextLevel,
-                new Color(91, 190, 255), new Color(31, 67, 93), new Color(190, 190, 190));
-
-        int rightX = 380;
-        g2.setFont(new Font("SansSerif", Font.BOLD, 16));
-        g2.drawString("Силы света / тьмы", rightX, 42);
-
-        g2.setFont(new Font("SansSerif", Font.PLAIN, 13));
-        g2.drawString("Трон света: " + Math.max(0, model.lightThrone().hp), rightX, 66);
-        drawBar(g2, rightX, 72, 220, 10,
-                model.lightThrone().maxHp == 0 ? 0.0 : (double) model.lightThrone().hp / model.lightThrone().maxHp,
-                new Color(90, 176, 255), new Color(32, 55, 83), new Color(190, 190, 190));
-
-        g2.drawString("Трон тьмы: " + Math.max(0, model.darkThrone().hp), rightX, 96);
-        drawBar(g2, rightX, 102, 220, 10,
-                model.darkThrone().maxHp == 0 ? 0.0 : (double) model.darkThrone().hp / model.darkThrone().maxHp,
-                new Color(237, 95, 88), new Color(83, 34, 31), new Color(190, 190, 190));
-
-        g2.drawString("Крипы на линиях: " + model.laneCreepCount(), rightX, 132);
-        g2.drawString("Нейтралы: " + model.neutralCreepCount(), rightX, 150);
-        g2.drawString("Фраги героя: " + model.kills(), rightX, 168);
-        g2.drawString("FPS: " + model.currentFps() + " / " + model.targetFps(), rightX, 186);
-
-        g2.drawString("1 Камень  2 Лук  3 Меч", rightX, 210);
-        g2.drawString("WASD - движение, ЛКМ - атака", rightX, 228);
-        g2.drawString("Линии: top / mid / bot", rightX, 246);
-        g2.drawString("Река делит квадратную карту по диагонали", rightX, 264);
-
+        drawObjectivesPanel(g2, model);
+        drawProgressPanel(g2, model);
+        drawMetaPanel(g2, model);
         drawMiniMap(g2, model);
 
         if (model.gameOver()) {
@@ -130,6 +74,76 @@ public final class HudRenderer {
             g2.setFont(new Font("SansSerif", Font.PLAIN, 22));
             g2.drawString("Press R to restart", model.panelWidth() / 2 - 96, model.panelHeight() / 2 + 30);
         }
+    }
+
+    private void drawObjectivesPanel(Graphics2D g2, Model model) {
+        drawPanel(g2, 16, 16, 278, 102);
+        g2.setColor(Color.WHITE);
+        g2.setFont(new Font("SansSerif", Font.BOLD, 16));
+        g2.drawString("Объекты", 30, 40);
+        g2.setFont(new Font("SansSerif", Font.PLAIN, 13));
+
+        g2.drawString("Трон света: " + Math.max(0, model.lightThrone().hp), 30, 62);
+        drawBar(g2, 30, 68, 236, 10,
+                model.lightThrone().maxHp == 0 ? 0.0 : (double) model.lightThrone().hp / model.lightThrone().maxHp,
+                new Color(90, 176, 255), new Color(32, 55, 83), new Color(190, 190, 190));
+
+        g2.drawString("Трон тьмы: " + Math.max(0, model.darkThrone().hp), 30, 92);
+        drawBar(g2, 30, 98, 236, 10,
+                model.darkThrone().maxHp == 0 ? 0.0 : (double) model.darkThrone().hp / model.darkThrone().maxHp,
+                new Color(237, 95, 88), new Color(83, 34, 31), new Color(190, 190, 190));
+    }
+
+    private void drawProgressPanel(Graphics2D g2, Model model) {
+        int panelX = 16;
+        int panelY = model.panelHeight() - 126;
+        drawPanel(g2, panelX, panelY, 320, 110);
+
+        g2.setColor(Color.WHITE);
+        g2.setFont(new Font("SansSerif", Font.BOLD, 16));
+        g2.drawString("Прогресс", panelX + 14, panelY + 24);
+        g2.setFont(new Font("SansSerif", Font.PLAIN, 13));
+
+        double reloadRatio = model.currentWeapon().reloadSeconds() == 0.0
+                ? 1.0
+                : 1.0 - model.reloadTimer() / model.currentWeapon().reloadSeconds();
+        if (model.reloadTimer() > 0.0) {
+            g2.drawString("Перезарядка", panelX + 14, panelY + 48);
+            drawBar(g2, panelX + 112, panelY + 38, 188, 11, reloadRatio,
+                    new Color(255, 206, 109), new Color(92, 74, 39), new Color(190, 190, 190));
+        } else {
+            g2.drawString("Боезапас: " + model.ammoInMagazine() + " / " + model.currentWeapon().magazineSize(), panelX + 14, panelY + 48);
+            drawBar(g2, panelX + 168, panelY + 38, 132, 11,
+                    model.currentWeapon().magazineSize() == 0 ? 0.0 : (double) model.ammoInMagazine() / model.currentWeapon().magazineSize(),
+                    new Color(245, 220, 143), new Color(92, 74, 39), new Color(190, 190, 190));
+        }
+
+        g2.drawString("XP: " + model.player().xp + " / " + model.player().xpToNextLevel, panelX + 14, panelY + 74);
+        drawBar(g2, panelX + 14, panelY + 82, 286, 12,
+                model.player().xpToNextLevel == 0 ? 0.0 : (double) model.player().xp / model.player().xpToNextLevel,
+                new Color(91, 190, 255), new Color(31, 67, 93), new Color(190, 190, 190));
+    }
+
+    private void drawMetaPanel(Graphics2D g2, Model model) {
+        int panelW = 278;
+        int panelH = 118;
+        int panelX = model.panelWidth() - panelW - 16;
+        int panelY = model.panelHeight() - panelH - 16;
+        drawPanel(g2, panelX, panelY, panelW, panelH);
+
+        g2.setColor(Color.WHITE);
+        g2.setFont(new Font("SansSerif", Font.BOLD, 16));
+        g2.drawString("Сводка", panelX + 14, panelY + 24);
+        g2.setFont(new Font("SansSerif", Font.PLAIN, 13));
+        g2.drawString("Крипы на линиях: " + model.laneCreepCount(), panelX + 14, panelY + 48);
+        g2.drawString("Нейтралы: " + model.neutralCreepCount(), panelX + 14, panelY + 66);
+        g2.drawString("Фраги героя: " + model.kills(), panelX + 14, panelY + 84);
+        g2.drawString("FPS: " + model.currentFps() + " / " + model.targetFps(), panelX + 14, panelY + 102);
+
+        g2.drawString("1 Камень  2 Лук  3 Меч", panelX + 144, panelY + 48);
+        g2.drawString("WASD движение", panelX + 144, panelY + 66);
+        g2.drawString("ЛКМ атака", panelX + 144, panelY + 84);
+        g2.drawString("R перезарядка", panelX + 144, panelY + 102);
     }
 
     private void drawMiniMap(Graphics2D g2, Model model) {
@@ -217,5 +231,12 @@ public final class HudRenderer {
 
         g2.setColor(border);
         g2.drawRoundRect(x, y, width, height, 8, 8);
+    }
+
+    private void drawPanel(Graphics2D g2, int x, int y, int width, int height) {
+        g2.setColor(new Color(0, 0, 0, 145));
+        g2.fillRoundRect(x, y, width, height, 12, 12);
+        g2.setColor(new Color(230, 230, 230, 120));
+        g2.drawRoundRect(x, y, width, height, 12, 12);
     }
 }
