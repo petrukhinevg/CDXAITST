@@ -1024,7 +1024,7 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
         audio.onPlayerAttack(currentWeapon);
 
         if (currentWeapon.projectile()) {
-            fireProjectile(currentWeapon);
+            fireProjectile(currentWeapon, playerAttackTarget);
             muzzleFlashTime = 0.06;
         } else {
             performMeleeAttack(currentWeapon);
@@ -1032,9 +1032,14 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
         }
     }
 
-    private void fireProjectile(WeaponType weapon) {
-        double dx = Math.cos(player.aimAngle);
-        double dy = Math.sin(player.aimAngle);
+    private void fireProjectile(WeaponType weapon, CombatEntity target) {
+        double aimAngle = player.aimAngle;
+        if (target != null && target.isAlive()) {
+            aimAngle = Math.atan2(target.getY() - player.y, target.getX() - player.x);
+        }
+
+        double dx = Math.cos(aimAngle);
+        double dy = Math.sin(aimAngle);
 
         Bullet bullet = new Bullet();
         bullet.x = player.x + dx * (player.radius + 9);
@@ -1045,6 +1050,7 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
         bullet.life = weapon.projectileLife() * ATTACK_RANGE_BALANCE_SCALE;
         bullet.damage = weapon.damage();
         bullet.colorArgb = weapon.projectileColorArgb();
+        bullet.target = target;
         bullets.add(bullet);
     }
 
@@ -1104,6 +1110,13 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
         Iterator<Bullet> it = bullets.iterator();
         while (it.hasNext()) {
             Bullet bullet = it.next();
+            if (bullet.target != null) {
+                if (updateTargetedBullet(bullet, dt)) {
+                    it.remove();
+                }
+                continue;
+            }
+
             bullet.x += bullet.vx * dt;
             bullet.y += bullet.vy * dt;
             bullet.life -= dt;
@@ -1177,6 +1190,71 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
             if (hit) {
                 it.remove();
             }
+        }
+    }
+
+    private boolean updateTargetedBullet(Bullet bullet, double dt) {
+        if (bullet.target == null) {
+            return false;
+        }
+        if (!isValidPlayerProjectileTarget(bullet.target)) {
+            return true;
+        }
+
+        double speed = Math.hypot(bullet.vx, bullet.vy);
+        if (speed <= 0.0001) {
+            return true;
+        }
+
+        double dx = bullet.target.getX() - bullet.x;
+        double dy = bullet.target.getY() - bullet.y;
+        double distanceToTarget = Math.hypot(dx, dy);
+        double hitDistance = bullet.radius + bullet.target.getRadius();
+        if (distanceToTarget <= hitDistance) {
+            applyPlayerProjectileHit(bullet.target, bullet.damage);
+            audio.onProjectileImpact();
+            return true;
+        }
+
+        double dirX = dx / distanceToTarget;
+        double dirY = dy / distanceToTarget;
+        bullet.vx = dirX * speed;
+        bullet.vy = dirY * speed;
+
+        double travelDistance = speed * dt;
+        if (travelDistance >= distanceToTarget - hitDistance) {
+            bullet.x = bullet.target.getX() - dirX * hitDistance;
+            bullet.y = bullet.target.getY() - dirY * hitDistance;
+            applyPlayerProjectileHit(bullet.target, bullet.damage);
+            audio.onProjectileImpact();
+            return true;
+        }
+
+        bullet.x += bullet.vx * dt;
+        bullet.y += bullet.vy * dt;
+        bullet.life -= dt;
+        if (bullet.life <= 0.0 || map.isBlockedPixel(bullet.x, bullet.y)) {
+            if (map.isBlockedPixel(bullet.x, bullet.y)) {
+                audio.onProjectileImpact();
+            }
+            return true;
+        }
+        return false;
+    }
+
+    private boolean isValidPlayerProjectileTarget(CombatEntity target) {
+        return target != null
+                && target.isAlive()
+                && target.getTeam() != player.team;
+    }
+
+    private void applyPlayerProjectileHit(CombatEntity target, int damage) {
+        if (target instanceof Player hero) {
+            damageHero(hero, damage);
+        } else if (target instanceof Creep creep) {
+            damageCreepByHero(creep, damage);
+        } else if (target instanceof Structure structure) {
+            damageStructure(structure, damage);
         }
     }
 

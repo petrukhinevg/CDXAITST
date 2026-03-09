@@ -9,4 +9,5 @@ public class Bullet {
     public double life;
     public int damage;
     public int colorArgb;
+    public CombatEntity target;
 }
