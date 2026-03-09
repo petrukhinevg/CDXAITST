@@ -2465,20 +2465,24 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
 
     private Structure findLaneTargetStructure(Team team, LaneType lane) {
         Team enemyTeam = team.opposite();
+        List<Point> path = lanePaths.get(team).get(lane);
 
         return structures.stream()
                 .filter(s -> s.hp > 0)
                 .filter(s -> s.team == enemyTeam)
                 .filter(s -> (s.type == StructureType.TOWER && s.lane == lane) || s.type == StructureType.THRONE)
-                .min(Comparator.comparingInt(this::laneObjectivePriority))
+                .min(Comparator.comparingDouble(structure -> laneObjectiveProgress(path, structure)))
                 .orElse(null);
     }
 
-    private int laneObjectivePriority(Structure structure) {
+    private double laneObjectiveProgress(List<Point> path, Structure structure) {
+        if (path != null && path.size() >= 2) {
+            return sampleLaneProgress(structure.x, structure.y, path).progress();
+        }
         if (structure.type == StructureType.TOWER) {
             return structure.laneOrder;
         }
-        return Integer.MAX_VALUE;
+        return Double.MAX_VALUE;
     }
 
     private Creep findNearestLaneCreepAround(double x, double y, double radius) {
