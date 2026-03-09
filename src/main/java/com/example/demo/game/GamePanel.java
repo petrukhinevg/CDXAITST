@@ -1574,9 +1574,30 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
         double arcHalf = Math.toRadians(currentWeapon.meleeArcDegrees() / 2.0);
         double start = player.aimAngle - arcHalf;
         double end = player.aimAngle + arcHalf;
-        int outerR = (int) Math.round(currentWeapon.meleeRange() * ZOOM);
-        int innerR = (int) Math.round(16 * ZOOM);
+        double outerR = currentWeapon.meleeRange() * ZOOM;
+        double innerR = 16.0 * ZOOM;
+        double centerR = (outerR + innerR) * 0.5;
 
+        for (int layer = 0; layer < 6; layer++) {
+            double t = layer / 5.0;
+            double angleInset = arcHalf * 0.36 * (1.0 - t);
+            double inner = innerR + (centerR - innerR) * (1.0 - t);
+            double outer = outerR - (outerR - centerR) * (1.0 - t);
+            Path2D.Double area = buildSwordSector(
+                    px,
+                    py,
+                    start + angleInset,
+                    end - angleInset,
+                    inner,
+                    outer
+            );
+            int alpha = 8 + (int) Math.round(t * 30.0);
+            g2.setColor(new Color(240, 236, 198, alpha));
+            g2.fill(area);
+        }
+    }
+
+    private Path2D.Double buildSwordSector(int px, int py, double start, double end, double innerR, double outerR) {
         Path2D.Double area = new Path2D.Double();
         area.moveTo(px + Math.cos(start) * innerR, py + Math.sin(start) * innerR);
         for (int i = 0; i <= 16; i++) {
@@ -1590,13 +1611,7 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
             area.lineTo(px + Math.cos(angle) * innerR, py + Math.sin(angle) * innerR);
         }
         area.closePath();
-
-        g2.setColor(new Color(240, 236, 198, 60));
-        g2.fill(area);
-
-        g2.setColor(new Color(255, 235, 170, 160));
-        g2.setStroke(new BasicStroke((float) (2.2f * ZOOM / 2.0)));
-        g2.draw(area);
+        return area;
     }
 
     private record PlayerPalette(Color primary, Color shadow, Color darkCloth, Color helmetMain, Color helmetShadow) {
