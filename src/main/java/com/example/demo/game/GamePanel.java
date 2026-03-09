@@ -120,7 +120,7 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
     private static final double UNIT_ATTACK_ANIMATION_PHASE_SPEED = 11.0;
     private static final double STRUCTURE_ATTACK_ANIMATION_DURATION = 0.42;
     private static final double UNIT_DEATH_DISSOLVE_DURATION = 0.62;
-    private static final double PLAYER_DAMAGE_BAR_SEGMENT_DURATION = 0.3;
+    private static final double PLAYER_DAMAGE_BAR_SEGMENT_DURATION = 1.0;
     private static final double CAMERA_MOVE_SPEED = 240.0;
     private static final double CAMERA_EDGE_MOVE_SPEED = 420.0;
     private static final int CAMERA_EDGE_SCROLL_MARGIN = 28;
