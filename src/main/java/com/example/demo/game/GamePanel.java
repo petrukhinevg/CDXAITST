@@ -65,13 +65,16 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
     private static final double PLAYER_MOVE_SPEED = 107.5;
     private static final double PLAYER_WAYPOINT_REACHED_DISTANCE = 8.0;
     private static final double PLAYER_DESTINATION_REACHED_DISTANCE = 10.0;
+    private static final double PLAYER_ATTACK_DESTINATION_REACHED_DISTANCE = 0.75;
     private static final double PLAYER_PATH_REBUILD_INTERVAL = 0.18;
+    private static final double PLAYER_ATTACK_APPROACH_RATIO = 0.95;
     private static final double CLICK_TARGET_PADDING = 8.0;
     private static final double CREEP_PATH_REBUILD_INTERVAL = 0.35;
     private static final double CREEP_WAYPOINT_REACHED_DISTANCE = 8.0;
     private static final double CAMERA_MOVE_SPEED = 240.0;
     private static final double CAMERA_EDGE_MOVE_SPEED = 420.0;
     private static final int CAMERA_EDGE_SCROLL_MARGIN = 28;
+    private static final double CLICK_MARKER_LIFETIME = 0.75;
 
     private final Random random = new Random();
 
@@ -88,6 +91,7 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
 
     private final List<Bullet> bullets = new ArrayList<>();
     private final List<ExperienceOrb> experienceOrbs = new ArrayList<>();
+    private final List<ClickMarker> clickMarkers = new ArrayList<>();
     private final List<Creep> laneCreeps = new ArrayList<>();
     private final List<Creep> neutralCreeps = new ArrayList<>();
     private final List<Structure> structures = new ArrayList<>();
@@ -104,10 +108,6 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
 
     private WeaponType currentWeapon = WeaponType.STONE;
 
-    private boolean up;
-    private boolean down;
-    private boolean left;
-    private boolean right;
     private boolean cameraUp;
     private boolean cameraDown;
     private boolean cameraLeft;
@@ -137,7 +137,7 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
     private double playerOrderY;
     private double playerPathFinalX;
     private double playerPathFinalY;
-    private Creep playerAttackTarget;
+    private CombatEntity playerAttackTarget;
     private final List<Point> playerPath = new ArrayList<>();
 
     private final int targetFps = detectTargetFps();
@@ -169,6 +169,7 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
 
         bullets.clear();
         experienceOrbs.clear();
+        clickMarkers.clear();
         laneCreeps.clear();
         neutralCreeps.clear();
         structures.clear();
@@ -440,6 +441,7 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
         resolveUnitCollisions();
         updateStructures(dt);
         updateExperienceOrbs(dt);
+        updateClickMarkers(dt);
 
         checkVictory();
         updateCamera(dt);
@@ -476,11 +478,6 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
     }
 
     private boolean updatePlayerControl(double dt) {
-        if (hasMovementInput()) {
-            clearPlayerOrders();
-            return movePlayerByKeyboard(dt);
-        }
-
         if (playerAttackTarget != null) {
             return updatePlayerAttackOrder(dt);
         }
@@ -492,35 +489,8 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
         return false;
     }
 
-    private boolean hasMovementInput() {
-        return up || down || left || right;
-    }
-
-    private boolean movePlayerByKeyboard(double dt) {
-        if (player.hp <= 0) {
-            return false;
-        }
-
-        double inputX = 0.0;
-        double inputY = 0.0;
-        if (up) inputY -= 1.0;
-        if (down) inputY += 1.0;
-        if (left) inputX -= 1.0;
-        if (right) inputX += 1.0;
-
-        if (inputX == 0.0 && inputY == 0.0) {
-            return false;
-        }
-
-        double len = Math.hypot(inputX, inputY);
-        inputX /= len;
-        inputY /= len;
-
-        return moveCombatUnit(player, inputX * PLAYER_MOVE_SPEED * dt, inputY * PLAYER_MOVE_SPEED * dt);
-    }
-
     private boolean updatePlayerMoveOrder(double dt) {
-        boolean moved = followPlayerPath(dt, playerOrderX, playerOrderY);
+        boolean moved = followPlayerPath(dt, playerOrderX, playerOrderY, PLAYER_DESTINATION_REACHED_DISTANCE);
         if (distance(player.x, player.y, playerOrderX, playerOrderY) <= PLAYER_DESTINATION_REACHED_DISTANCE) {
             clearPlayerOrders();
         }
@@ -528,13 +498,13 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
     }
 
     private boolean updatePlayerAttackOrder(double dt) {
-        if (playerAttackTarget == null || playerAttackTarget.hp <= 0) {
+        if (playerAttackTarget == null || !playerAttackTarget.isAlive()) {
             clearPlayerOrders();
             return false;
         }
 
-        player.aimAngle = Math.atan2(playerAttackTarget.y - player.y, playerAttackTarget.x - player.x);
-        double attackReach = playerAttackReach(playerAttackTarget);
+        player.aimAngle = Math.atan2(playerAttackTarget.getY() - player.y, playerAttackTarget.getX() - player.x);
+        double attackReach = desiredPlayerAttackReach(playerAttackTarget);
         if (canPlayerAttackTargetFrom(player.x, player.y, playerAttackTarget, attackReach)) {
             clearPlayerPath();
             if (attackCooldown <= 0.0) {
@@ -547,10 +517,10 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
             rebuildPlayerAttackPath(playerAttackTarget);
         }
 
-        return followPlayerPath(dt, playerPathFinalX, playerPathFinalY);
+        return followPlayerPath(dt, playerPathFinalX, playerPathFinalY, PLAYER_ATTACK_DESTINATION_REACHED_DISTANCE);
     }
 
-    private boolean followPlayerPath(double dt, double finalX, double finalY) {
+    private boolean followPlayerPath(double dt, double finalX, double finalY, double destinationReachedDistance) {
         while (!playerPath.isEmpty()) {
             Point waypoint = playerPath.get(0);
             double waypointX = map.tileCenter(waypoint.x);
@@ -562,7 +532,7 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
             return movePlayerTowards(dt, waypointX, waypointY);
         }
 
-        if (distance(player.x, player.y, finalX, finalY) <= PLAYER_DESTINATION_REACHED_DISTANCE) {
+        if (distance(player.x, player.y, finalX, finalY) <= destinationReachedDistance) {
             return false;
         }
 
@@ -618,9 +588,9 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
         applyPlayerPath(path, playerOrderX, playerOrderY);
     }
 
-    private void issueAttackOrder(Creep target) {
+    private void issueAttackOrder(CombatEntity target) {
         clearPlayerOrders();
-        if (gameOver || player.hp <= 0 || target == null || target.hp <= 0) {
+        if (gameOver || player.hp <= 0 || target == null || !target.isAlive()) {
             return;
         }
 
@@ -628,13 +598,22 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
         rebuildPlayerAttackPath(target);
     }
 
-    private void rebuildPlayerAttackPath(Creep target) {
-        if (target == null || target.hp <= 0) {
+    private void addClickMarker(double worldX, double worldY, boolean attack) {
+        ClickMarker marker = new ClickMarker();
+        marker.x = worldX;
+        marker.y = worldY;
+        marker.attack = attack;
+        marker.lifetime = CLICK_MARKER_LIFETIME;
+        clickMarkers.add(marker);
+    }
+
+    private void rebuildPlayerAttackPath(CombatEntity target) {
+        if (target == null || !target.isAlive()) {
             clearPlayerOrders();
             return;
         }
 
-        double attackReach = playerAttackReach(target);
+        double attackReach = desiredPlayerAttackReach(target);
         PathSearchResult path = findPlayerPath(new TileGoal() {
             @Override
             public boolean isGoal(int tileX, int tileY) {
@@ -646,7 +625,7 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
 
             @Override
             public double heuristic(int tileX, int tileY) {
-                double dist = distance(map.tileCenter(tileX), map.tileCenter(tileY), target.x, target.y);
+                double dist = distance(map.tileCenter(tileX), map.tileCenter(tileY), target.getX(), target.getY());
                 return Math.max(0.0, dist - attackReach) / map.getTileSize();
             }
         });
@@ -689,6 +668,10 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
                     + target.getRadius();
         }
         return currentWeapon.meleeRange() + target.getRadius();
+    }
+
+    private double desiredPlayerAttackReach(CombatEntity target) {
+        return playerAttackReach(target) * PLAYER_ATTACK_APPROACH_RATIO;
     }
 
     private boolean canPlayerAttackTargetFrom(double sourceX, double sourceY, CombatEntity target, double attackReach) {
@@ -1531,6 +1514,17 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
         }
     }
 
+    private void updateClickMarkers(double dt) {
+        Iterator<ClickMarker> it = clickMarkers.iterator();
+        while (it.hasNext()) {
+            ClickMarker marker = it.next();
+            marker.lifetime -= dt;
+            if (marker.lifetime <= 0.0) {
+                it.remove();
+            }
+        }
+    }
+
     private void gainExperience(int value) {
         player.xp += value;
         while (player.xp >= player.xpToNextLevel) {
@@ -1677,8 +1671,8 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
         return bestHero;
     }
 
-    private Creep findClickedHostileCreep(double worldX, double worldY) {
-        Creep target = null;
+    private CombatEntity findClickedHostileTarget(double worldX, double worldY) {
+        CombatEntity target = null;
         double bestDistance = Double.MAX_VALUE;
 
         for (Creep creep : laneCreeps) {
@@ -1705,6 +1699,30 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
             }
         }
 
+        for (Player hero : heroes) {
+            if (!isHostileHero(hero)) {
+                continue;
+            }
+
+            double dist = distance(worldX, worldY, hero.x, hero.y);
+            if (dist <= hero.radius + CLICK_TARGET_PADDING && dist < bestDistance) {
+                bestDistance = dist;
+                target = hero;
+            }
+        }
+
+        for (Structure structure : structures) {
+            if (!isHostileStructure(structure)) {
+                continue;
+            }
+
+            double dist = distance(worldX, worldY, structure.x, structure.y);
+            if (dist <= structure.radius + CLICK_TARGET_PADDING && dist < bestDistance) {
+                bestDistance = dist;
+                target = structure;
+            }
+        }
+
         return target;
     }
 
@@ -1727,7 +1745,23 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
 
         currentWeapon = weapon;
         attackCooldown = Math.min(attackCooldown, 0.12);
+        refreshPlayerAttackOrderForCurrentWeapon();
+    }
+
+    private void refreshPlayerAttackOrderForCurrentWeapon() {
         playerPathRefreshCooldown = 0.0;
+        if (playerAttackTarget == null || !playerAttackTarget.isAlive()) {
+            return;
+        }
+
+        double attackReach = desiredPlayerAttackReach(playerAttackTarget);
+        player.aimAngle = Math.atan2(playerAttackTarget.getY() - player.y, playerAttackTarget.getX() - player.x);
+        if (canPlayerAttackTargetFrom(player.x, player.y, playerAttackTarget, attackReach)) {
+            clearPlayerPath();
+            return;
+        }
+
+        rebuildPlayerAttackPath(playerAttackTarget);
     }
 
     private void triggerAbility(AbilitySlot slot) {
@@ -1910,6 +1944,7 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
 
         g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
         drawStructures(g2);
+        drawClickMarkers(g2);
         drawCreeps(g2);
         drawExperienceOrbs(g2);
         drawBullets(g2);
@@ -1967,6 +2002,67 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
             drawHealthBar(g2, sx, sy - r - 12, 54, 7,
                     (double) s.hp / s.maxHp,
                     s.team == Team.LIGHT ? new Color(88, 168, 255) : new Color(248, 96, 88));
+        }
+    }
+
+    private void drawClickMarkers(Graphics2D g2) {
+        for (ClickMarker marker : clickMarkers) {
+            double progress = 1.0 - marker.lifetime / CLICK_MARKER_LIFETIME;
+            double pulse = Math.sin(progress * Math.PI);
+            int alpha = (int) Math.round(220 * (1.0 - progress));
+            int sx = worldToScreenX(marker.x);
+            int sy = worldToScreenY(marker.y);
+            if (marker.attack) {
+                int outerRadius = (int) Math.round((10.0 + progress * 22.0) * ZOOM);
+                int innerRadius = (int) Math.round((4.0 + pulse * 5.0) * ZOOM);
+                int spikeGap = (int) Math.round((7.0 + pulse * 3.0) * ZOOM);
+                int spikeLen = (int) Math.round((7.0 + (1.0 - progress) * 4.0) * ZOOM);
+
+                g2.setColor(new Color(255, 94, 78, Math.max(0, alpha / 4)));
+                g2.fillOval(sx - outerRadius, sy - outerRadius, outerRadius * 2, outerRadius * 2);
+
+                g2.setStroke(new BasicStroke((float) Math.max(2.0, 3.2 * (1.0 - progress))));
+                g2.setColor(new Color(255, 98, 82, Math.max(0, alpha)));
+                g2.drawOval(sx - outerRadius, sy - outerRadius, outerRadius * 2, outerRadius * 2);
+
+                g2.setColor(new Color(255, 214, 205, Math.max(0, alpha)));
+                g2.drawOval(sx - innerRadius, sy - innerRadius, innerRadius * 2, innerRadius * 2);
+
+                g2.drawLine(sx - spikeGap - spikeLen, sy, sx - spikeGap, sy);
+                g2.drawLine(sx + spikeGap, sy, sx + spikeGap + spikeLen, sy);
+                g2.drawLine(sx, sy - spikeGap - spikeLen, sx, sy - spikeGap);
+                g2.drawLine(sx, sy + spikeGap, sx, sy + spikeGap + spikeLen);
+
+                int diag = (int) Math.round((3.0 + pulse * 3.0) * ZOOM);
+                g2.drawLine(sx - diag, sy - diag, sx + diag, sy + diag);
+                g2.drawLine(sx - diag, sy + diag, sx + diag, sy - diag);
+            } else {
+                int outerRadius = (int) Math.round((8.0 + progress * 18.0) * ZOOM);
+                int innerRadius = (int) Math.round((4.0 + pulse * 4.0) * ZOOM);
+                int bracketOffset = (int) Math.round((5.0 + pulse * 2.5) * ZOOM);
+                int bracketLen = (int) Math.round((5.0 + (1.0 - progress) * 4.0) * ZOOM);
+
+                g2.setColor(new Color(88, 236, 132, Math.max(0, alpha / 5)));
+                g2.fillOval(sx - outerRadius, sy - outerRadius, outerRadius * 2, outerRadius * 2);
+
+                g2.setStroke(new BasicStroke((float) Math.max(2.0, 3.0 * (1.0 - progress))));
+                g2.setColor(new Color(74, 230, 118, Math.max(0, alpha)));
+                g2.drawOval(sx - outerRadius, sy - outerRadius, outerRadius * 2, outerRadius * 2);
+                g2.drawOval(sx - innerRadius, sy - innerRadius, innerRadius * 2, innerRadius * 2);
+
+                g2.setColor(new Color(205, 255, 219, Math.max(0, alpha)));
+                g2.drawLine(sx - bracketOffset - bracketLen, sy - bracketOffset, sx - bracketOffset, sy - bracketOffset);
+                g2.drawLine(sx - bracketOffset, sy - bracketOffset - bracketLen, sx - bracketOffset, sy - bracketOffset);
+
+                g2.drawLine(sx + bracketOffset, sy - bracketOffset, sx + bracketOffset + bracketLen, sy - bracketOffset);
+                g2.drawLine(sx + bracketOffset, sy - bracketOffset - bracketLen, sx + bracketOffset, sy - bracketOffset);
+
+                g2.drawLine(sx - bracketOffset - bracketLen, sy + bracketOffset, sx - bracketOffset, sy + bracketOffset);
+                g2.drawLine(sx - bracketOffset, sy + bracketOffset, sx - bracketOffset, sy + bracketOffset + bracketLen);
+
+                g2.drawLine(sx + bracketOffset, sy + bracketOffset, sx + bracketOffset + bracketLen, sy + bracketOffset);
+                g2.drawLine(sx + bracketOffset, sy + bracketOffset, sx + bracketOffset, sy + bracketOffset + bracketLen);
+            }
         }
     }
 
@@ -2373,6 +2469,13 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
     private record PlayerPalette(Color primary, Color shadow, Color darkCloth, Color helmetMain, Color helmetShadow) {
     }
 
+    private static final class ClickMarker {
+        private double x;
+        private double y;
+        private double lifetime;
+        private boolean attack;
+    }
+
     private void drawBullets(Graphics2D g2) {
         for (Bullet bullet : bullets) {
             int bx = worldToScreenX(bullet.x);
@@ -2439,10 +2542,6 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
     @Override
     public void keyPressed(KeyEvent e) {
         switch (e.getKeyCode()) {
-            case KeyEvent.VK_W -> up = true;
-            case KeyEvent.VK_S -> down = true;
-            case KeyEvent.VK_A -> left = true;
-            case KeyEvent.VK_D -> right = true;
             case KeyEvent.VK_UP -> cameraUp = true;
             case KeyEvent.VK_DOWN -> cameraDown = true;
             case KeyEvent.VK_LEFT -> cameraLeft = true;
@@ -2467,10 +2566,6 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
     @Override
     public void keyReleased(KeyEvent e) {
         switch (e.getKeyCode()) {
-            case KeyEvent.VK_W -> up = false;
-            case KeyEvent.VK_S -> down = false;
-            case KeyEvent.VK_A -> left = false;
-            case KeyEvent.VK_D -> right = false;
             case KeyEvent.VK_UP -> cameraUp = false;
             case KeyEvent.VK_DOWN -> cameraDown = false;
             case KeyEvent.VK_LEFT -> cameraLeft = false;
@@ -2507,12 +2602,13 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
     public void mousePressed(MouseEvent e) {
         mouseMoved(e);
 
-        if (e.getButton() == MouseEvent.BUTTON1) {
+        if (e.getButton() == MouseEvent.BUTTON3) {
             double worldX = screenToWorldX(e.getX());
             double worldY = screenToWorldY(e.getY());
-            Creep clickedCreep = findClickedHostileCreep(worldX, worldY);
-            if (clickedCreep != null) {
-                issueAttackOrder(clickedCreep);
+            CombatEntity clickedTarget = findClickedHostileTarget(worldX, worldY);
+            addClickMarker(worldX, worldY, clickedTarget != null);
+            if (clickedTarget != null) {
+                issueAttackOrder(clickedTarget);
             } else {
                 issueMoveOrder(worldX, worldY);
             }
