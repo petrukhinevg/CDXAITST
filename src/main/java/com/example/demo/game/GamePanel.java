@@ -31,6 +31,9 @@ import java.awt.DisplayMode;
 import java.awt.Graphics;
 import java.awt.Graphics2D;
 import java.awt.GraphicsEnvironment;
+import java.awt.AlphaComposite;
+import java.awt.Composite;
+import java.awt.geom.Path2D;
 import java.awt.Point;
 import java.awt.RenderingHints;
 import java.awt.image.BufferedImage;
@@ -49,6 +52,7 @@ import java.awt.event.MouseMotionListener;
 
 public class GamePanel extends JPanel implements KeyListener, MouseMotionListener, MouseListener {
     private static final double ZOOM = 2.0;
+    private static final double HERO_RENDER_SCALE = 1.18;
 
     private final Random random = new Random();
 
@@ -140,6 +144,7 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
 
         player.x = map.tileCenter(GameConfig.PLAYER_START_TILE_X);
         player.y = map.tileCenter(GameConfig.PLAYER_START_TILE_Y);
+        player.radius = 14.5;
         player.team = heroTeam;
         player.maxHp = 120;
         player.hp = player.maxHp;
@@ -1223,7 +1228,7 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
         int py = worldToScreenY(player.y);
 
         BufferedImage sprite = sprites.getPlayerFrame(player.state, player.animPhase);
-        drawSpriteWithFacing(g2, sprite, px, py, player.aimAngle);
+        drawTintedSpriteWithFacing(g2, sprite, px, py, player.aimAngle, HERO_RENDER_SCALE, playerTint());
 
         if (player.state != AnimationState.DEAD) {
             drawHeldWeapon(g2, px, py);
@@ -1231,8 +1236,8 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
     }
 
     private void drawHeldWeapon(Graphics2D g2, int px, int py) {
-        int handX = (int) (px + Math.cos(player.aimAngle) * 4 * ZOOM);
-        int handY = (int) (py + Math.sin(player.aimAngle) * 4 * ZOOM);
+        int handX = (int) (px + Math.cos(player.aimAngle) * 5 * ZOOM);
+        int handY = (int) (py + Math.sin(player.aimAngle) * 5 * ZOOM);
 
         switch (currentWeapon) {
             case SWORD -> {
@@ -1247,11 +1252,7 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
                 g2.drawLine(px - 2, py - 2, px + 2, py + 2);
 
                 if (swordSwingTime > 0.0) {
-                    int arcR = (int) Math.round(currentWeapon.meleeRange() * ZOOM);
-                    g2.setColor(new Color(255, 236, 165, 110));
-                    g2.setStroke(new BasicStroke((float) (2.5f * ZOOM / 2.0)));
-                    int start = (int) Math.toDegrees(player.aimAngle - Math.toRadians(currentWeapon.meleeArcDegrees() / 2.0));
-                    g2.drawArc(px - arcR, py - arcR, arcR * 2, arcR * 2, -start, (int) currentWeapon.meleeArcDegrees());
+                    drawSwordAttackArea(g2, px, py);
                 }
             }
             case BOW -> {
@@ -1295,16 +1296,92 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
     }
 
     private void drawSpriteWithFacing(Graphics2D g2, BufferedImage sprite, int centerX, int centerY, double angle) {
+        drawTintedSpriteWithFacing(g2, sprite, centerX, centerY, angle, 1.0, null);
+    }
+
+    private void drawTintedSpriteWithFacing(Graphics2D g2,
+                                            BufferedImage sprite,
+                                            int centerX,
+                                            int centerY,
+                                            double angle,
+                                            double scale,
+                                            Color tint) {
         int w = (int) Math.round(sprite.getWidth() * ZOOM);
         int h = (int) Math.round(sprite.getHeight() * ZOOM);
+        w = (int) Math.round(w * scale);
+        h = (int) Math.round(h * scale);
         int drawX = centerX - w / 2;
         int drawY = centerY - h / 2;
 
+        BufferedImage imageToDraw = tint == null ? sprite : tintedSprite(sprite, tint);
         if (Math.cos(angle) < 0) {
-            g2.drawImage(sprite, drawX + w, drawY, -w, h, null);
+            g2.drawImage(imageToDraw, drawX + w, drawY, -w, h, null);
         } else {
-            g2.drawImage(sprite, drawX, drawY, w, h, null);
+            g2.drawImage(imageToDraw, drawX, drawY, w, h, null);
         }
+    }
+
+    private BufferedImage tintedSprite(BufferedImage sprite, Color tint) {
+        BufferedImage tinted = new BufferedImage(sprite.getWidth(), sprite.getHeight(), BufferedImage.TYPE_INT_ARGB);
+        Graphics2D tg = tinted.createGraphics();
+        tg.drawImage(sprite, 0, 0, null);
+        Composite oldComposite = tg.getComposite();
+        tg.setComposite(AlphaComposite.SrcAtop.derive(0.42f));
+        tg.setColor(tint);
+        tg.fillRect(0, 0, sprite.getWidth(), sprite.getHeight());
+        tg.setComposite(oldComposite);
+        tg.dispose();
+        return tinted;
+    }
+
+    private Color playerTint() {
+        return switch (currentWeapon) {
+            case BOW -> new Color(88, 170, 88);
+            case SWORD -> new Color(152, 152, 152);
+            case STONE -> new Color(132, 98, 68);
+        };
+    }
+
+    private void drawSwordAttackArea(Graphics2D g2, int px, int py) {
+        double arcHalf = Math.toRadians(currentWeapon.meleeArcDegrees() / 2.0);
+        double start = player.aimAngle - arcHalf;
+        double end = player.aimAngle + arcHalf;
+        int outerR = (int) Math.round(currentWeapon.meleeRange() * ZOOM);
+        int innerR = (int) Math.round(16 * ZOOM);
+
+        Path2D.Double area = new Path2D.Double();
+        area.moveTo(px + Math.cos(start) * innerR, py + Math.sin(start) * innerR);
+        for (int i = 0; i <= 16; i++) {
+            double t = i / 16.0;
+            double angle = start + (end - start) * t;
+            area.lineTo(px + Math.cos(angle) * outerR, py + Math.sin(angle) * outerR);
+        }
+        for (int i = 16; i >= 0; i--) {
+            double t = i / 16.0;
+            double angle = start + (end - start) * t;
+            area.lineTo(px + Math.cos(angle) * innerR, py + Math.sin(angle) * innerR);
+        }
+        area.closePath();
+
+        g2.setColor(new Color(240, 236, 198, 60));
+        g2.fill(area);
+
+        g2.setStroke(new BasicStroke(1.8f));
+        for (int stripe = 0; stripe < 8; stripe++) {
+            double t = stripe / 7.0;
+            double angle = start + (end - start) * t;
+            int x1 = (int) Math.round(px + Math.cos(angle) * innerR);
+            int y1 = (int) Math.round(py + Math.sin(angle) * innerR);
+            int x2 = (int) Math.round(px + Math.cos(angle) * outerR);
+            int y2 = (int) Math.round(py + Math.sin(angle) * outerR);
+            g2.setColor(new Color(255, 245, 182, 180));
+            g2.drawLine(x1, y1, x2, y2);
+        }
+
+        g2.setColor(new Color(255, 235, 170, 160));
+        g2.setStroke(new BasicStroke((float) (2.2f * ZOOM / 2.0)));
+        int startDeg = (int) Math.round(Math.toDegrees(start));
+        g2.drawArc(px - outerR, py - outerR, outerR * 2, outerR * 2, -startDeg, (int) currentWeapon.meleeArcDegrees());
     }
 
     private void drawBullets(Graphics2D g2) {

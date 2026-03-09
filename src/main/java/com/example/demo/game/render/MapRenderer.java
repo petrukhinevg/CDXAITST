@@ -53,7 +53,7 @@ public class MapRenderer {
         int tile = map.getTileSize();
 
         Color base = switch (type) {
-            case FOREST -> new Color(96, 140, 82);
+            case FOREST -> new Color(86, 128, 76);
             case GRASS -> new Color(102, 146, 86);
             case GRASS_ALT -> new Color(88, 131, 74);
             case DIRT -> new Color(125, 103, 74);
@@ -124,6 +124,11 @@ public class MapRenderer {
         Color leafMain = shift(new Color(46, 118, 56), tintLevel * 7);
         Color leafDark = shift(new Color(32, 89, 42), tintLevel * 6);
         Color leafLight = shift(new Color(72, 140, 74), tintLevel * 8);
+
+        g2.setColor(new Color(58, 93, 52, 52));
+        g2.fillOval(sx + 1, sy + tile - 15, tile - 2, 11);
+        g2.setColor(new Color(48, 80, 44, 34));
+        g2.fillOval(sx - 1, sy + tile - 17, tile + 2, 13);
 
         int underNoise = tileNoise(tileX, tileY);
         if ((underNoise & 31) < 6) {
