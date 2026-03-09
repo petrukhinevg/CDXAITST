@@ -118,6 +118,7 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
     private static final int CAMERA_EDGE_SCROLL_MARGIN = 28;
     private static final double CLICK_MARKER_LIFETIME = 0.75;
     private static final double ATTACK_RANGE_BALANCE_SCALE = 1.0 / 1.25;
+    private static final double PLAYER_FOOTSTEP_INTERVAL = 0.24;
 
     private final Random random = new Random();
 
@@ -176,6 +177,7 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
     private double swordSwingTime;
     private double laneWaveTimer;
     private double playerPathRefreshCooldown;
+    private double playerFootstepTimer;
 
     private int kills;
     private boolean gameOver;
@@ -207,6 +209,7 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
     private String editorStatusText = "Tab: editor mode";
     private double editorStatusTimer;
     private boolean editorDirty;
+    private boolean playerNextFootstepLeft = true;
 
     public GamePanel() {
         setPreferredSize(new Dimension(GameConfig.VIEW_W, GameConfig.VIEW_H));
@@ -250,6 +253,7 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
         swordSwingTime = 0.0;
         laneWaveTimer = 15.0;
         playerPathRefreshCooldown = 0.0;
+        playerFootstepTimer = 0.0;
 
         kills = 0;
         gameOver = false;
@@ -261,6 +265,7 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
         editorDirty = false;
         editorStatusText = "Tab: editor mode";
         editorStatusTimer = 0.0;
+        playerNextFootstepLeft = true;
         clearPlayerOrders();
 
         spawnLaneWave();
@@ -585,6 +590,7 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
         }
 
         updatePlayerAnimation(dt, moved);
+        updatePlayerFootsteps(dt, moved);
         updateBullets(dt);
         updateLaneCreeps(dt);
         updateNeutralCreeps(dt);
@@ -625,6 +631,23 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
             player.state = AnimationState.IDLE;
             player.animPhase += dt * 4.0;
         }
+    }
+
+    private void updatePlayerFootsteps(double dt, boolean moved) {
+        if (!moved || player.hp <= 0 || gameOver || player.attackAnimationTimer > 0.0) {
+            playerFootstepTimer = 0.0;
+            playerNextFootstepLeft = true;
+            return;
+        }
+
+        playerFootstepTimer -= dt;
+        if (playerFootstepTimer > 0.0) {
+            return;
+        }
+
+        soundPlayer.play(playerNextFootstepLeft ? SoundEffect.FOOTSTEP_LEFT : SoundEffect.FOOTSTEP_RIGHT);
+        playerNextFootstepLeft = !playerNextFootstepLeft;
+        playerFootstepTimer += PLAYER_FOOTSTEP_INTERVAL;
     }
 
     private boolean updatePlayerControl(double dt) {
@@ -736,7 +759,6 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
         playerOrderX = canOccupy(player, clampedX, clampedY) ? clampedX : map.tileCenter(goalTile.x);
         playerOrderY = canOccupy(player, clampedX, clampedY) ? clampedY : map.tileCenter(goalTile.y);
         applyPlayerPath(path, playerOrderX, playerOrderY);
-        soundPlayer.play(SoundEffect.MOVE_ORDER);
     }
 
     private void issueAttackOrder(CombatEntity target) {
@@ -747,7 +769,6 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
 
         playerAttackTarget = target;
         rebuildPlayerAttackPath(target);
-        soundPlayer.play(SoundEffect.ATTACK_ORDER);
     }
 
     private void addClickMarker(double worldX, double worldY, boolean attack) {
@@ -1013,6 +1034,8 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
         hero.animPhase = 0.0;
         if (hero == player) {
             clearPlayerOrders();
+            playerFootstepTimer = 0.0;
+            playerNextFootstepLeft = true;
         }
     }
 
@@ -2263,6 +2286,7 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
         }
 
         currentWeapon = weapon;
+        soundPlayer.play(SoundEffect.WEAPON_SWITCH);
         attackCooldown = Math.min(attackCooldown, 0.12);
         refreshPlayerAttackOrderForCurrentWeapon();
     }

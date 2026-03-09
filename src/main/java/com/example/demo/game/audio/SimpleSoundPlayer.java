@@ -24,15 +24,20 @@ public final class SimpleSoundPlayer implements AutoCloseable {
     private volatile boolean closed;
 
     public SimpleSoundPlayer() {
-        sounds.put(SoundEffect.MOVE_ORDER, sequence(
-                tone(740.0, 920.0, 0.040, 0.16, Wave.SINE),
-                silence(0.012),
-                tone(980.0, 1220.0, 0.050, 0.14, Wave.SINE)
+        sounds.put(SoundEffect.FOOTSTEP_LEFT, sequence(
+                tone(1800.0, 980.0, 0.024, 0.040, Wave.NOISE),
+                tone(1320.0, 760.0, 0.032, 0.030, Wave.NOISE),
+                tone(520.0, 680.0, 0.018, 0.010, Wave.SINE)
         ));
-        sounds.put(SoundEffect.ATTACK_ORDER, sequence(
-                tone(540.0, 720.0, 0.030, 0.17, Wave.TRIANGLE),
-                silence(0.010),
-                tone(640.0, 940.0, 0.055, 0.16, Wave.TRIANGLE)
+        sounds.put(SoundEffect.FOOTSTEP_RIGHT, sequence(
+                tone(1960.0, 1120.0, 0.022, 0.038, Wave.NOISE),
+                tone(1440.0, 820.0, 0.030, 0.028, Wave.NOISE),
+                tone(610.0, 760.0, 0.016, 0.010, Wave.SINE)
+        ));
+        sounds.put(SoundEffect.WEAPON_SWITCH, sequence(
+                tone(760.0, 1180.0, 0.070, 0.030, Wave.NOISE),
+                tone(980.0, 420.0, 0.110, 0.026, Wave.NOISE),
+                tone(620.0, 860.0, 0.055, 0.018, Wave.SINE)
         ));
         sounds.put(SoundEffect.RANGED_ATTACK, sequence(
                 tone(920.0, 460.0, 0.090, 0.18, Wave.TRIANGLE),
@@ -122,6 +127,7 @@ public final class SimpleSoundPlayer implements AutoCloseable {
         int frames = frames(durationSeconds);
         byte[] pcm = new byte[frames * 2];
         double phase = 0.0;
+        int noise = 0x13579bdf;
 
         for (int i = 0; i < frames; i++) {
             double progress = frames == 1 ? 1.0 : i / (double) (frames - 1);
@@ -129,7 +135,8 @@ public final class SimpleSoundPlayer implements AutoCloseable {
             phase += Math.PI * 2.0 * frequency / SAMPLE_RATE;
 
             double envelope = envelope(progress);
-            double sample = sampleWave(phase, wave) * amplitude * envelope;
+            noise = noise * 1664525 + 1013904223;
+            double sample = sampleWave(phase, wave, noise) * amplitude * envelope;
             short value = (short) Math.round(sample * Short.MAX_VALUE);
             pcm[i * 2] = (byte) (value & 0xff);
             pcm[i * 2 + 1] = (byte) ((value >>> 8) & 0xff);
@@ -152,17 +159,19 @@ public final class SimpleSoundPlayer implements AutoCloseable {
         return 1.0;
     }
 
-    private double sampleWave(double phase, Wave wave) {
+    private double sampleWave(double phase, Wave wave, int noise) {
         return switch (wave) {
             case SINE -> Math.sin(phase);
             case TRIANGLE -> 2.0 * Math.abs(2.0 * (phase / (Math.PI * 2.0) - Math.floor(phase / (Math.PI * 2.0) + 0.5))) - 1.0;
             case SQUARE -> Math.sin(phase) >= 0.0 ? 1.0 : -1.0;
+            case NOISE -> ((noise >>> 8) & 0xffff) / 32767.5 - 1.0;
         };
     }
 
     private enum Wave {
         SINE,
         TRIANGLE,
-        SQUARE
+        SQUARE,
+        NOISE
     }
 }

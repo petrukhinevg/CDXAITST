@@ -1,8 +1,9 @@
 package com.example.demo.game.audio;
 
 public enum SoundEffect {
-    MOVE_ORDER,
-    ATTACK_ORDER,
+    FOOTSTEP_LEFT,
+    FOOTSTEP_RIGHT,
+    WEAPON_SWITCH,
     RANGED_ATTACK,
     MELEE_ATTACK,
     PLAYER_HIT,
