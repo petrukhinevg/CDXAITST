@@ -23,6 +23,7 @@ public class Player implements CombatUnit {
     public double respawnTimer;
     public double attackTimer;
     public double attackAnimationTimer;
+    public double deathAnimationTimer;
     public AnimationState state = AnimationState.IDLE;
 
     @Override

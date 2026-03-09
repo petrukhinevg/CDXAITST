@@ -56,8 +56,10 @@ import java.io.IOException;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.ArrayDeque;
 import java.util.Collections;
 import java.util.Comparator;
+import java.util.Deque;
 import java.util.EnumMap;
 import java.util.IdentityHashMap;
 import java.util.Iterator;
@@ -117,6 +119,8 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
     private static final double UNIT_ATTACK_ANIMATION_DURATION = 0.28;
     private static final double UNIT_ATTACK_ANIMATION_PHASE_SPEED = 11.0;
     private static final double STRUCTURE_ATTACK_ANIMATION_DURATION = 0.42;
+    private static final double UNIT_DEATH_DISSOLVE_DURATION = 0.62;
+    private static final double PLAYER_DAMAGE_BAR_SEGMENT_DURATION = 0.3;
     private static final double CAMERA_MOVE_SPEED = 240.0;
     private static final double CAMERA_EDGE_MOVE_SPEED = 420.0;
     private static final int CAMERA_EDGE_SCROLL_MARGIN = 28;
@@ -145,6 +149,7 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
     private final List<Creep> neutralCreeps = new ArrayList<>();
     private final List<Structure> structures = new ArrayList<>();
     private final List<HeroAbility> heroAbilities = new ArrayList<>();
+    private final Deque<DamageBarSegment> playerDamageBarQueue = new ArrayDeque<>();
 
     private final EnumMap<Team, EnumMap<LaneType, List<Point>>> lanePaths = new EnumMap<>(Team.class);
 
@@ -304,9 +309,11 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
         hero.respawnTimer = 0.0;
         hero.attackTimer = 0.0;
         hero.attackAnimationTimer = 0.0;
+        hero.deathAnimationTimer = 0.0;
         hero.state = AnimationState.IDLE;
         if (hero == player) {
             clearPlayerOrders();
+            clearPlayerDamageBarQueue();
         }
     }
 
@@ -536,6 +543,8 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
         creep.lookAngle = Math.atan2(next.y - start.y, next.x - start.x);
         creep.laneNavigationGoalIndex = -1;
         creep.laneRepathCooldown = 0.0;
+        creep.deathAnimationTimer = 0.0;
+        creep.deathRewardsGranted = false;
         laneCreeps.add(creep);
     }
 
@@ -606,9 +615,11 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
         muzzleFlashTime = Math.max(0.0, muzzleFlashTime - dt);
         swordSwingTime = Math.max(0.0, swordSwingTime - dt);
         playerPathRefreshCooldown = Math.max(0.0, playerPathRefreshCooldown - dt);
+        updatePlayerDamageBarQueue(dt);
 
         for (Player hero : heroes) {
             if (hero.hp <= 0) {
+                hero.deathAnimationTimer = Math.max(0.0, hero.deathAnimationTimer - dt);
                 hero.respawnTimer = Math.max(0.0, hero.respawnTimer - dt);
                 if (!gameOver && hero.respawnTimer <= 0.0) {
                     respawnHero(hero);
@@ -1063,11 +1074,13 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
         hero.respawnTimer = 0.0;
         hero.attackTimer = 0.0;
         hero.attackAnimationTimer = 0.0;
+        hero.deathAnimationTimer = 0.0;
         hero.state = AnimationState.IDLE;
         hero.animPhase = 0.0;
         if (hero == player) {
             clearPlayerOrders();
             audio.resetPlayerMovementLoop();
+            clearPlayerDamageBarQueue();
         }
     }
 
@@ -1320,8 +1333,9 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
             Creep creep = it.next();
 
             if (creep.hp <= 0) {
-                handleCreepDeathRewards(creep, 8 + random.nextInt(4));
-                it.remove();
+                if (updateDeadCreep(creep, dt, 8, 4)) {
+                    it.remove();
+                }
                 continue;
             }
 
@@ -1853,8 +1867,9 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
             Creep creep = it.next();
 
             if (creep.hp <= 0) {
-                handleCreepDeathRewards(creep, 14 + random.nextInt(6));
-                it.remove();
+                if (updateDeadCreep(creep, dt, 14, 6)) {
+                    it.remove();
+                }
                 continue;
             }
 
@@ -2054,6 +2069,19 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
         }
     }
 
+    private boolean updateDeadCreep(Creep creep, double dt, int baseXp, int xpVariance) {
+        if (!creep.deathRewardsGranted) {
+            handleCreepDeathRewards(creep, baseXp + random.nextInt(xpVariance));
+            creep.deathRewardsGranted = true;
+        }
+        creep.attackTimer = 0.0;
+        creep.attackAnimationTimer = 0.0;
+        creep.moving = false;
+        creep.animPhase += dt * 4.0;
+        creep.deathAnimationTimer = Math.max(0.0, creep.deathAnimationTimer - dt);
+        return creep.deathAnimationTimer <= 0.0;
+    }
+
     private Player findLaneHeroTarget(Creep creep) {
         if (gameOver) {
             return null;
@@ -2087,24 +2115,40 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
     }
 
     private void damageCreepByHero(Creep creep, int damage) {
+        if (creep.hp <= 0) {
+            return;
+        }
         creep.lastHitByHero = true;
         creep.lastHitByCreep = false;
         damageEntity(creep, damage);
         if (creep.hp <= 0) {
+            beginCreepDeath(creep);
             audio.onEnemyDown();
         }
     }
 
     private void damageCreepByCreep(Creep creep, int damage) {
+        if (creep.hp <= 0) {
+            return;
+        }
         creep.lastHitByHero = false;
         creep.lastHitByCreep = true;
         damageEntity(creep, damage);
+        if (creep.hp <= 0) {
+            beginCreepDeath(creep);
+        }
     }
 
     private void damageCreepByStructure(Creep creep, int damage) {
+        if (creep.hp <= 0) {
+            return;
+        }
         creep.lastHitByHero = false;
         creep.lastHitByCreep = false;
         damageEntity(creep, damage);
+        if (creep.hp <= 0) {
+            beginCreepDeath(creep);
+        }
     }
 
     private void damageStructure(Structure structure, int damage) {
@@ -2119,29 +2163,59 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
         if (hero.hp <= 0 || hero.hitCooldown > 0.0) {
             return;
         }
+        int previousHp = hero.hp;
         hero.hitCooldown = 0.35;
         damageEntity(hero, damage);
+        if (hero == player) {
+            queuePlayerDamageBar(previousHp - Math.max(hero.hp, 0));
+        }
         if (hero == player) {
             audio.onPlayerHit();
         } else if (hero.hp <= 0) {
             audio.onEnemyDown();
         }
         if (hero.hp <= 0) {
-            hero.hp = 0;
-            hero.respawnTimer = HERO_RESPAWN_TIME;
-            hero.moving = false;
-            hero.attackTimer = 0.0;
-            hero.attackAnimationTimer = 0.0;
-            hero.state = AnimationState.DEAD;
-            hero.animPhase = 0.0;
-            if (hero == player) {
-                clearPlayerOrders();
-            }
+            beginHeroDeath(hero);
         }
     }
 
     private void damageEntity(CombatEntity entity, int damage) {
         entity.applyDamage(damage);
+    }
+
+    private void beginCreepDeath(Creep creep) {
+        if (creep.hp > 0 || creep.deathAnimationTimer > 0.0) {
+            return;
+        }
+        creep.hp = 0;
+        creep.moving = false;
+        creep.attackTimer = 0.0;
+        creep.attackAnimationTimer = 0.0;
+        creep.aggroedToHero = false;
+        creep.state = AnimationState.DEAD;
+        creep.animPhase = 0.0;
+        creep.deathAnimationTimer = UNIT_DEATH_DISSOLVE_DURATION;
+        creep.deathRewardsGranted = false;
+        clearCreepLanePath(creep);
+    }
+
+    private void beginHeroDeath(Player hero) {
+        if (hero.hp > 0) {
+            return;
+        }
+        hero.hp = 0;
+        hero.hitCooldown = 0.0;
+        hero.moving = false;
+        hero.attackTimer = 0.0;
+        hero.attackAnimationTimer = 0.0;
+        hero.deathAnimationTimer = UNIT_DEATH_DISSOLVE_DURATION;
+        hero.respawnTimer = HERO_RESPAWN_TIME;
+        hero.state = AnimationState.DEAD;
+        hero.animPhase = 0.0;
+        if (hero == player) {
+            clearPlayerOrders();
+            clearPlayerDamageBarQueue();
+        }
     }
 
     private void handleCreepDeathRewards(Creep creep, int totalXp) {
@@ -2232,6 +2306,7 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
             player.xpToNextLevel = (int) Math.round(player.xpToNextLevel * 1.33 + 12);
             player.maxHp += 10;
             player.hp = Math.min(player.maxHp, player.hp + 18);
+            clearPlayerDamageBarQueue();
         }
     }
 
@@ -3609,7 +3684,7 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
     }
 
     private void drawCreep(Graphics2D g2, Creep creep) {
-        if (creep.hp <= 0) {
+        if (creep.hp <= 0 && creep.deathAnimationTimer <= 0.0) {
             return;
         }
 
@@ -3617,6 +3692,11 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
         int sy = worldToScreenY(creep.y);
         int renderSy = sy + (int) Math.round(laneCreepVisualYOffset(creep));
         int r = (int) Math.round(creep.radius * ZOOM);
+        if (creep.hp <= 0) {
+            drawDissolvingCreep(g2, creep, sx, sy, renderSy, r);
+            return;
+        }
+
         if (creep.role == CreepRole.LANE) {
             drawLaneCreepVisual(g2, creep, sx, renderSy, r);
         } else {
@@ -3675,7 +3755,10 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
 
     private void drawLaneCreepVisual(Graphics2D g2, Creep creep, int sx, int sy, int radius) {
         drawLaneCreepShadow(g2, creep, sx, sy, radius);
+        drawLaneCreepBody(g2, creep, sx, sy, radius);
+    }
 
+    private void drawLaneCreepBody(Graphics2D g2, Creep creep, int sx, int sy, int radius) {
         Graphics2D cg = (Graphics2D) g2.create();
         cg.translate(sx, sy);
         if (Math.cos(creep.lookAngle) < 0.0) {
@@ -3694,6 +3777,35 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
             }
         }
         cg.dispose();
+    }
+
+    private void drawDissolvingCreep(Graphics2D g2, Creep creep, int sx, int sy, int renderSy, int radius) {
+        double progress = deathDissolveProgress(creep.deathAnimationTimer);
+        int lift = deathLiftPixels(progress);
+        int bodyCenterY = renderSy - lift;
+        int vaporRadius = Math.max(radius, 10);
+
+        drawDeathGroundShadow(g2, sx, renderSy, radius, progress);
+
+        Graphics2D fadeG = (Graphics2D) g2.create();
+        applyDeathDissolve(fadeG, sx, bodyCenterY, deathBodyWidth(creep, radius), deathBodyHeight(creep, radius), progress);
+        if (creep.role == CreepRole.LANE) {
+            drawLaneCreepBody(fadeG, creep, sx, bodyCenterY, radius);
+        } else {
+            BufferedImage sprite = sprites.getPlayerFrame(creep.state, creep.animPhase);
+            drawTintedSpriteWithFacing(fadeG, sprite, sx, sy - lift, creep.lookAngle, creepRenderScale(creep), creepTint(creep));
+            vaporRadius = Math.max(vaporRadius, (int) Math.round(sprite.getWidth() * ZOOM * creepRenderScale(creep) * 0.35));
+        }
+        fadeG.dispose();
+
+        drawDeathEvaporationParticles(
+                g2,
+                sx,
+                bodyCenterY - deathBodyHeight(creep, radius) / 4,
+                vaporRadius,
+                progress,
+                deathVaporColor(creep.team)
+        );
     }
 
     private void drawLaneCreepShadow(Graphics2D g2, Creep creep, int sx, int sy, int radius) {
@@ -4043,29 +4155,186 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
 
     private void drawHeroes(Graphics2D g2) {
         for (Player hero : heroes) {
-            if (hero.hp <= 0) {
+            if (hero.hp <= 0 && hero.deathAnimationTimer <= 0.0) {
                 continue;
             }
 
             int px = worldToScreenX(hero.x);
             int py = worldToScreenY(hero.y);
+            BufferedImage sprite = heroSprite(hero);
+            if (hero.hp <= 0) {
+                drawDissolvingHero(g2, hero, sprite, px, py);
+                continue;
+            }
+            drawHeroBody(g2, hero, sprite, px, py, true);
+        }
+    }
 
-            if (hero == player) {
-                BufferedImage sprite = customizePlayerSprite(sprites.getPlayerFrame(hero.state, hero.animPhase));
-                drawTintedSpriteWithFacing(g2, sprite, px, py, hero.aimAngle, HERO_RENDER_SCALE, null);
-                drawPlayerHelmet(g2, px, py);
+    private BufferedImage heroSprite(Player hero) {
+        if (hero == player) {
+            return customizePlayerSprite(sprites.getPlayerFrame(hero.state, hero.animPhase));
+        }
+        return hero.team == Team.LIGHT
+                ? sprites.getPlayerFrame(hero.state, hero.animPhase)
+                : sprites.getEnemyFrame(hero.state, hero.animPhase);
+    }
 
-                if (hero.state != AnimationState.DEAD) {
-                    drawHeldWeapon(g2, px, py);
-                }
+    private void drawHeroBody(Graphics2D g2, Player hero, BufferedImage sprite, int px, int py, boolean includeWeapon) {
+        drawTintedSpriteWithFacing(g2, sprite, px, py, hero.aimAngle, HERO_RENDER_SCALE, null);
+        if (hero == player) {
+            drawPlayerHelmet(g2, px, py);
+            if (includeWeapon && hero.state != AnimationState.DEAD) {
+                drawHeldWeapon(g2, px, py);
+            }
+        }
+    }
+
+    private void drawDissolvingHero(Graphics2D g2, Player hero, BufferedImage sprite, int px, int py) {
+        double progress = deathDissolveProgress(hero.deathAnimationTimer);
+        int radius = (int) Math.round(hero.radius * ZOOM);
+        int lift = deathLiftPixels(progress);
+        int bodyCenterY = py - lift;
+        int bodyWidth = (int) Math.round(sprite.getWidth() * ZOOM * HERO_RENDER_SCALE);
+        int bodyHeight = (int) Math.round(sprite.getHeight() * ZOOM * HERO_RENDER_SCALE);
+
+        drawDeathGroundShadow(g2, px, py, radius, progress);
+
+        Graphics2D fadeG = (Graphics2D) g2.create();
+        applyDeathDissolve(fadeG, px, bodyCenterY, bodyWidth, bodyHeight, progress);
+        drawHeroBody(fadeG, hero, sprite, px, bodyCenterY, false);
+        fadeG.dispose();
+
+        drawDeathEvaporationParticles(
+                g2,
+                px,
+                bodyCenterY - bodyHeight / 4,
+                Math.max(radius, bodyWidth / 3),
+                progress,
+                deathVaporColor(hero.team)
+        );
+    }
+
+    private double deathDissolveProgress(double timer) {
+        return 1.0 - clamp(timer / UNIT_DEATH_DISSOLVE_DURATION, 0.0, 1.0);
+    }
+
+    private int deathLiftPixels(double progress) {
+        return (int) Math.round(progress * 14.0 * ZOOM);
+    }
+
+    private int deathBodyWidth(Creep creep, int radius) {
+        if (creep.role != CreepRole.LANE) {
+            BufferedImage sprite = sprites.getPlayerFrame(creep.state, creep.animPhase);
+            return (int) Math.round(sprite.getWidth() * ZOOM * creepRenderScale(creep));
+        }
+        return switch (creep.laneType) {
+            case MELEE -> Math.max(radius * 2, (int) Math.round(radius * 2.0));
+            case RANGED -> Math.max(radius * 2, (int) Math.round(radius * 2.15));
+            case CATAPULT -> Math.max(radius * 2, (int) Math.round(radius * 2.8));
+        };
+    }
+
+    private int deathBodyHeight(Creep creep, int radius) {
+        if (creep.role != CreepRole.LANE) {
+            BufferedImage sprite = sprites.getPlayerFrame(creep.state, creep.animPhase);
+            return (int) Math.round(sprite.getHeight() * ZOOM * creepRenderScale(creep));
+        }
+        return switch (creep.laneType) {
+            case MELEE -> Math.max(radius * 2, (int) Math.round(radius * 2.55));
+            case RANGED -> Math.max(radius * 2, (int) Math.round(radius * 2.75));
+            case CATAPULT -> Math.max(radius * 2, (int) Math.round(radius * 2.2));
+        };
+    }
+
+    private void applyDeathDissolve(Graphics2D g2, int centerX, int centerY, int width, int height, double progress) {
+        float alpha = (float) clamp(1.0 - progress * 0.92, 0.0, 1.0);
+        g2.setComposite(AlphaComposite.getInstance(AlphaComposite.SRC_OVER, alpha));
+        g2.clip(buildDeathDissolveClip(centerX, centerY, width, height, progress));
+    }
+
+    private Path2D.Double buildDeathDissolveClip(int centerX, int centerY, int width, int height, double progress) {
+        double left = centerX - width / 2.0;
+        double right = centerX + width / 2.0;
+        double top = centerY - height * 0.62;
+        double bottom = centerY + height * 0.58;
+        double cutY = top + progress * (bottom - top + height * 0.18);
+        double wave = 2.0 + progress * 5.0;
+
+        Path2D.Double clip = new Path2D.Double();
+        clip.moveTo(left, bottom);
+        clip.lineTo(left, cutY + Math.sin(progress * 9.0 + left * 0.06) * wave);
+        for (int i = 1; i <= 8; i++) {
+            double t = i / 8.0;
+            double x = left + (right - left) * t;
+            double y = cutY
+                    + Math.sin(progress * 10.0 + i * 0.85) * wave
+                    + Math.cos(progress * 6.0 + i * 0.55) * wave * 0.35;
+            clip.lineTo(x, y);
+        }
+        clip.lineTo(right, bottom);
+        clip.closePath();
+        return clip;
+    }
+
+    private void drawDeathGroundShadow(Graphics2D g2, int sx, int sy, int radius, double progress) {
+        int shadowW = Math.max(10, (int) Math.round(radius * (1.45 - progress * 0.2)));
+        int shadowH = Math.max(4, (int) Math.round(radius * (0.42 - progress * 0.08)));
+        int alpha = Math.max(0, (int) Math.round(58 * (1.0 - progress)));
+        if (alpha <= 0) {
+            return;
+        }
+        g2.setColor(new Color(10, 12, 18, alpha));
+        g2.fillOval(sx - shadowW / 2, sy + radius - shadowH / 2 + 4, shadowW, shadowH);
+    }
+
+    private void drawDeathEvaporationParticles(Graphics2D g2, int centerX, int centerY, int radius, double progress, Color color) {
+        int mistAlpha = Math.max(0, (int) Math.round(84 * (1.0 - progress * 0.35)));
+        if (mistAlpha > 0) {
+            int mistW = Math.max(16, (int) Math.round(radius * (1.65 + progress * 0.7)));
+            int mistH = Math.max(10, (int) Math.round(radius * (1.0 + progress * 0.2)));
+            g2.setColor(new Color(color.getRed(), color.getGreen(), color.getBlue(), mistAlpha));
+            g2.fillOval(centerX - mistW / 2, centerY - mistH / 2, mistW, mistH);
+
+            int upperMistW = Math.max(14, (int) Math.round(radius * (1.2 + progress * 0.55)));
+            int upperMistH = Math.max(8, (int) Math.round(radius * 0.72));
+            g2.setColor(new Color(255, 255, 255, Math.max(0, mistAlpha / 2)));
+            g2.fillOval(centerX - upperMistW / 2, centerY - mistH / 2 - upperMistH / 2 - (int) Math.round(progress * 10.0), upperMistW, upperMistH);
+        }
+
+        for (int i = 0; i < 14; i++) {
+            double local = clamp(progress * 1.28 - i * 0.055, 0.0, 1.0);
+            if (local <= 0.0) {
                 continue;
             }
 
-            BufferedImage sprite = hero.team == Team.LIGHT
-                    ? sprites.getPlayerFrame(hero.state, hero.animPhase)
-                    : sprites.getEnemyFrame(hero.state, hero.animPhase);
-            drawTintedSpriteWithFacing(g2, sprite, px, py, hero.aimAngle, HERO_RENDER_SCALE, null);
+            double driftX = Math.sin(i * 1.31 + progress * 7.8) * radius * (0.18 + local * 0.52);
+            double driftY = (6.0 + i * 1.9 + local * 21.0) * ZOOM;
+            int px = (int) Math.round(centerX + driftX);
+            int py = (int) Math.round(centerY - driftY + Math.cos(i * 0.65 + progress * 9.2) * 2.4);
+            int pr = Math.max(2, (int) Math.round((2.0 + (i % 4) * 0.8) * ZOOM * (1.0 - local * 0.22)));
+            int alpha = Math.max(0, (int) Math.round((122 - i * 5) * (1.0 - local * 0.78) * (1.0 - progress * 0.12)));
+            if (alpha <= 0) {
+                continue;
+            }
+
+            g2.setColor(new Color(color.getRed(), color.getGreen(), color.getBlue(), alpha));
+            g2.fillOval(px - pr, py - pr, pr * 2, pr * 2);
+
+            int glowAlpha = Math.max(0, alpha / 3);
+            if (glowAlpha > 0) {
+                int glowR = pr + Math.max(1, pr / 2);
+                g2.setColor(new Color(255, 255, 255, glowAlpha));
+                g2.fillOval(px - glowR, py - glowR, glowR * 2, glowR * 2);
+            }
         }
+    }
+
+    private Color deathVaporColor(Team team) {
+        return switch (team) {
+            case LIGHT -> new Color(244, 230, 186);
+            case DARK -> new Color(210, 98, 84);
+            case NEUTRAL -> new Color(188, 166, 126);
+        };
     }
 
     private void drawHeroOverheadHud(Graphics2D g2) {
@@ -4095,9 +4364,7 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
         int weaponW = g2.getFontMetrics().stringWidth(weaponText);
         g2.drawString(weaponText, px - weaponW / 2, topY - 6);
 
-        drawHealthBar(g2, px + 8, topY + 7, 86, 8,
-                player.maxHp == 0 ? 0.0 : (double) player.hp / player.maxHp,
-                new Color(223, 79, 77));
+        drawPlayerHealthBar(g2, px + 8, topY + 7, 86, 8);
     }
 
     private void drawHeldWeapon(Graphics2D g2, int px, int py) {
@@ -4394,6 +4661,16 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
     private record PlayerPalette(Color primary, Color shadow, Color darkCloth, Color helmetMain, Color helmetShadow) {
     }
 
+    private static final class DamageBarSegment {
+        private final int amount;
+        private double remainingTime;
+
+        private DamageBarSegment(int amount, double remainingTime) {
+            this.amount = amount;
+            this.remainingTime = remainingTime;
+        }
+    }
+
     private static final class ClickMarker {
         private double x;
         private double y;
@@ -4430,6 +4707,73 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
 
         g2.setColor(new Color(220, 220, 220, 170));
         g2.drawRoundRect(x, y, width, height, 6, 6);
+    }
+
+    private void drawPlayerHealthBar(Graphics2D g2, int centerX, int y, int width, int height) {
+        int x = centerX - width / 2;
+        double hpRatio = player.maxHp == 0 ? 0.0 : clamp((double) player.hp / player.maxHp, 0.0, 1.0);
+        double pendingDamageHp = playerPendingDamageHp();
+        double trailRatio = player.maxHp == 0
+                ? hpRatio
+                : clamp((player.hp + pendingDamageHp) / player.maxHp, hpRatio, 1.0);
+
+        g2.setColor(new Color(0, 0, 0, 160));
+        g2.fillRoundRect(x, y, width, height, 6, 6);
+
+        int innerWidth = width - 2;
+        int fillW = (int) Math.round(innerWidth * hpRatio);
+        int trailW = Math.max(0, (int) Math.round(innerWidth * trailRatio) - fillW);
+        if (trailW > 0) {
+            int trailX = x + 1 + fillW;
+            g2.setColor(new Color(255, 255, 255, 228));
+            g2.fillRoundRect(trailX, y + 1, trailW, height - 2, 5, 5);
+            g2.setColor(new Color(255, 255, 255, 120));
+            g2.fillRect(trailX, y + 1, trailW, Math.max(1, height / 3));
+        }
+
+        g2.setColor(new Color(223, 79, 77));
+        g2.fillRoundRect(x + 1, y + 1, fillW, height - 2, 5, 5);
+
+        g2.setColor(new Color(220, 220, 220, 170));
+        g2.drawRoundRect(x, y, width, height, 6, 6);
+    }
+
+    private void queuePlayerDamageBar(int damageTaken) {
+        if (damageTaken <= 0 || player.maxHp <= 0) {
+            return;
+        }
+        playerDamageBarQueue.addLast(new DamageBarSegment(damageTaken, PLAYER_DAMAGE_BAR_SEGMENT_DURATION));
+    }
+
+    private void updatePlayerDamageBarQueue(double dt) {
+        double remainingDt = dt;
+        while (remainingDt > 0.0 && !playerDamageBarQueue.isEmpty()) {
+            DamageBarSegment segment = playerDamageBarQueue.peekFirst();
+            segment.remainingTime -= remainingDt;
+            if (segment.remainingTime > 0.0) {
+                break;
+            }
+            remainingDt = -segment.remainingTime;
+            playerDamageBarQueue.removeFirst();
+        }
+    }
+
+    private double playerPendingDamageHp() {
+        double total = 0.0;
+        boolean first = true;
+        for (DamageBarSegment segment : playerDamageBarQueue) {
+            if (first) {
+                total += segment.amount * clamp(segment.remainingTime / PLAYER_DAMAGE_BAR_SEGMENT_DURATION, 0.0, 1.0);
+                first = false;
+            } else {
+                total += segment.amount;
+            }
+        }
+        return total;
+    }
+
+    private void clearPlayerDamageBarQueue() {
+        playerDamageBarQueue.clear();
     }
 
     private HudRenderer.Model buildHudModel() {
