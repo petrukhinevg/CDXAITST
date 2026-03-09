@@ -4,6 +4,8 @@ import com.example.demo.game.config.GameConfig;
 import com.example.demo.game.editor.MapEditor;
 import com.example.demo.game.model.AnimationState;
 import com.example.demo.game.model.Bullet;
+import com.example.demo.game.model.CombatEntity;
+import com.example.demo.game.model.CombatUnit;
 import com.example.demo.game.model.Creep;
 import com.example.demo.game.model.CreepRole;
 import com.example.demo.game.model.ExperienceOrb;
@@ -140,13 +142,16 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
 
         player.x = map.tileCenter(GameConfig.PLAYER_START_TILE_X);
         player.y = map.tileCenter(GameConfig.PLAYER_START_TILE_Y);
+        player.team = heroTeam;
         player.maxHp = 120;
         player.hp = player.maxHp;
+        player.defense = 2;
         player.level = 1;
         player.xp = 0;
         player.xpToNextLevel = 50;
         player.animPhase = 0.0;
         player.attackTimer = 0.0;
+        player.attackAnimationTimer = 0.0;
         player.state = AnimationState.IDLE;
 
         currentWeapon = WeaponType.STONE;
@@ -233,6 +238,7 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
         s.maxHp = 360;
         s.hp = s.maxHp;
         s.damage = 14;
+        s.defense = 3;
         s.attackRange = 185;
         s.attackCooldown = 1.1;
         return s;
@@ -250,6 +256,7 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
         s.maxHp = 1300;
         s.hp = s.maxHp;
         s.damage = 18;
+        s.defense = 6;
         s.attackRange = 230;
         s.attackCooldown = 1.0;
         return s;
@@ -268,10 +275,12 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
                 c.maxHp = 90;
                 c.hp = c.maxHp;
                 c.damage = 8;
+                c.defense = 1;
                 c.moveSpeed = 0;
                 c.attackRange = 34;
                 c.attackCooldown = 1.1;
                 c.attackTimer = random.nextDouble() * 0.8;
+                c.lookAngle = random.nextDouble() * Math.PI * 2.0;
                 neutralCreeps.add(c);
             }
         }
@@ -319,12 +328,14 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
         creep.maxHp = 58;
         creep.hp = creep.maxHp;
         creep.damage = 7;
+        creep.defense = 1;
         creep.moveSpeed = 66;
         creep.attackRange = 31;
         creep.attackCooldown = 0.82;
         creep.attackTimer = 0.12 * idx;
         creep.waypointIndex = 1;
         creep.animPhase = random.nextDouble() * 3.0;
+        creep.lookAngle = Math.atan2(next.y - start.y, next.x - start.x);
         laneCreeps.add(creep);
     }
 
@@ -351,6 +362,7 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
         swordSwingTime = Math.max(0.0, swordSwingTime - dt);
 
         player.attackTimer = Math.max(0.0, player.attackTimer - dt);
+        player.attackAnimationTimer = Math.max(0.0, player.attackAnimationTimer - dt);
 
         if (reloadTimer > 0.0) {
             reloadTimer = Math.max(0.0, reloadTimer - dt);
@@ -381,6 +393,7 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
         updateBullets(dt);
         updateLaneCreeps(dt);
         updateNeutralCreeps(dt);
+        resolveUnitCollisions();
         updateStructures(dt);
         updateExperienceOrbs(dt);
 
@@ -404,7 +417,7 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
             return;
         }
 
-        if (player.attackTimer > 0.0) {
+        if (player.attackAnimationTimer > 0.0) {
             player.state = AnimationState.ATTACK;
             player.animPhase += dt * 16.0;
             return;
@@ -436,19 +449,7 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
         inputY /= len;
 
         double speed = 215.0;
-        double oldX = player.x;
-        double oldY = player.y;
-        double nextX = player.x + inputX * speed * dt;
-        double nextY = player.y + inputY * speed * dt;
-
-        if (canMove(nextX, player.y, player.radius)) {
-            player.x = nextX;
-        }
-        if (canMove(player.x, nextY, player.radius)) {
-            player.y = nextY;
-        }
-
-        return distance(oldX, oldY, player.x, player.y) > 0.01;
+        return moveCombatUnit(player, inputX * speed * dt, inputY * speed * dt);
     }
 
     private void attackWithCurrentWeapon() {
@@ -463,6 +464,7 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
 
         ammoInMagazine--;
         player.attackTimer = currentWeapon.attackAnimationTime();
+        player.attackAnimationTimer = currentWeapon.attackAnimationTime();
         player.animPhase = 0.0;
         attackCooldown = currentWeapon.cooldown();
 
@@ -600,21 +602,30 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
             }
 
             creep.attackTimer = Math.max(0.0, creep.attackTimer - dt);
-            creep.animPhase += dt * 7.0;
+            creep.attackAnimationTimer = Math.max(0.0, creep.attackAnimationTimer - dt);
 
             Creep enemyCreep = findNearestEnemyLaneCreep(creep, 130.0);
             if (enemyCreep != null) {
                 engageCreepTarget(creep, enemyCreep, dt);
+                updateCreepAnimation(creep, dt);
+                continue;
+            }
+
+            if (shouldLaneCreepAttackHero(creep)) {
+                engageHeroTarget(creep, dt);
+                updateCreepAnimation(creep, dt);
                 continue;
             }
 
             Structure enemyStructure = findLaneTargetStructure(creep);
             if (enemyStructure != null && enemyStructure.hp > 0 && distance(creep.x, creep.y, enemyStructure.x, enemyStructure.y) < 180.0) {
                 engageStructureTarget(creep, enemyStructure, dt);
+                updateCreepAnimation(creep, dt);
                 continue;
             }
 
             moveAlongLane(creep, dt);
+            updateCreepAnimation(creep, dt);
         }
     }
 
@@ -628,6 +639,7 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
         if (creep.attackTimer <= 0.0) {
             damageCreep(target, creep.damage);
             creep.attackTimer = creep.attackCooldown;
+            triggerUnitAttackAnimation(creep, target.x, target.y);
         }
     }
 
@@ -641,6 +653,21 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
         if (creep.attackTimer <= 0.0) {
             damageStructure(target, creep.damage);
             creep.attackTimer = creep.attackCooldown;
+            triggerUnitAttackAnimation(creep, target.x, target.y);
+        }
+    }
+
+    private void engageHeroTarget(Creep creep, double dt) {
+        double dist = distance(creep.x, creep.y, player.x, player.y);
+        if (dist > creep.attackRange + player.radius) {
+            moveTowards(creep, player.x, player.y, creep.moveSpeed * dt);
+            return;
+        }
+
+        if (creep.attackTimer <= 0.0) {
+            damagePlayer(creep.damage);
+            creep.attackTimer = creep.attackCooldown;
+            triggerUnitAttackAnimation(creep, player.x, player.y);
         }
     }
 
@@ -673,12 +700,15 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
         double dy = ty - creep.y;
         double len = Math.hypot(dx, dy);
         if (len < 0.0001) {
+            creep.moving = false;
             return;
         }
 
         double step = Math.min(distanceStep, len);
-        creep.x += dx / len * step;
-        creep.y += dy / len * step;
+        double dirX = dx / len;
+        double dirY = dy / len;
+        creep.lookAngle = Math.atan2(dirY, dirX);
+        creep.moving = moveCombatUnit(creep, dirX * step, dirY * step);
     }
 
     private void updateNeutralCreeps(double dt) {
@@ -693,7 +723,7 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
             }
 
             creep.attackTimer = Math.max(0.0, creep.attackTimer - dt);
-            creep.animPhase += dt * 4.0;
+            creep.attackAnimationTimer = Math.max(0.0, creep.attackAnimationTimer - dt);
 
             Creep targetLaneCreep = findNearestLaneCreepAround(creep.x, creep.y, 92.0);
             double heroDist = gameOver ? Double.MAX_VALUE : distance(creep.x, creep.y, player.x, player.y);
@@ -702,13 +732,17 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
                 if (creep.attackTimer <= 0.0) {
                     damageCreep(targetLaneCreep, creep.damage);
                     creep.attackTimer = creep.attackCooldown;
+                    triggerUnitAttackAnimation(creep, targetLaneCreep.x, targetLaneCreep.y);
                 }
             } else if (heroDist <= creep.attackRange + player.radius) {
                 if (creep.attackTimer <= 0.0) {
                     damagePlayer(creep.damage);
                     creep.attackTimer = creep.attackCooldown;
+                    triggerUnitAttackAnimation(creep, player.x, player.y);
                 }
             }
+
+            updateCreepAnimation(creep, dt);
         }
     }
 
@@ -754,20 +788,105 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
         }
     }
 
+    private void resolveUnitCollisions() {
+        List<CombatUnit> units = new ArrayList<>();
+        if (!gameOver && player.hp > 0) {
+            units.add(player);
+        }
+        addLivingUnits(units, laneCreeps);
+        addLivingUnits(units, neutralCreeps);
+
+        for (int pass = 0; pass < 2; pass++) {
+            for (int i = 0; i < units.size(); i++) {
+                for (int j = i + 1; j < units.size(); j++) {
+                    separateUnits(units.get(i), units.get(j));
+                }
+            }
+        }
+    }
+
+    private void addLivingUnits(List<CombatUnit> units, List<Creep> creeps) {
+        for (Creep creep : creeps) {
+            if (creep.hp > 0) {
+                units.add(creep);
+            }
+        }
+    }
+
+    private void separateUnits(CombatUnit a, CombatUnit b) {
+        double dx = b.getX() - a.getX();
+        double dy = b.getY() - a.getY();
+        double dist = Math.hypot(dx, dy);
+        double minDist = a.getRadius() + b.getRadius();
+        if (dist >= minDist) {
+            return;
+        }
+
+        if (dist < 0.0001) {
+            dx = 1.0;
+            dy = 0.0;
+            dist = 1.0;
+        }
+
+        double overlap = minDist - dist;
+        double nx = dx / dist;
+        double ny = dy / dist;
+
+        boolean movedA = tryMoveCombatUnit(a, a.getX() - nx * overlap * 0.5, a.getY() - ny * overlap * 0.5);
+        boolean movedB = tryMoveCombatUnit(b, b.getX() + nx * overlap * 0.5, b.getY() + ny * overlap * 0.5);
+
+        if (!movedA) {
+            tryMoveCombatUnit(b, b.getX() + nx * overlap, b.getY() + ny * overlap);
+        }
+        if (!movedB) {
+            tryMoveCombatUnit(a, a.getX() - nx * overlap, a.getY() - ny * overlap);
+        }
+    }
+
+    private void triggerUnitAttackAnimation(CombatUnit unit, double targetX, double targetY) {
+        unit.setLookAngle(Math.atan2(targetY - unit.getY(), targetX - unit.getX()));
+        unit.setAttackAnimationTimer(0.18);
+        unit.setAnimPhase(0.0);
+    }
+
+    private void updateCreepAnimation(Creep creep, double dt) {
+        if (creep.attackAnimationTimer > 0.0) {
+            creep.state = AnimationState.ATTACK;
+            creep.animPhase += dt * 18.0;
+        } else if (creep.moving) {
+            creep.state = AnimationState.WALK;
+            creep.animPhase += dt * 8.0;
+        } else {
+            creep.state = AnimationState.IDLE;
+            creep.animPhase += dt * 4.5;
+        }
+    }
+
+    private boolean shouldLaneCreepAttackHero(Creep creep) {
+        return !gameOver
+                && creep.team != heroTeam
+                && distance(creep.x, creep.y, player.x, player.y) <= 140.0
+                && findNearestLaneCreepByTeam(player.x, player.y, 96.0, heroTeam) == null;
+    }
+
     private void damageCreep(Creep creep, int damage) {
-        creep.hp -= damage;
+        damageEntity(creep, damage);
     }
 
     private void damageStructure(Structure structure, int damage) {
-        structure.hp -= damage;
+        damageEntity(structure, damage);
     }
 
     private void damagePlayer(int damage) {
         if (playerHitCooldown > 0.0) {
             return;
         }
-        player.hp -= damage;
         playerHitCooldown = 0.35;
+        damageEntity(player, damage);
+    }
+
+    private void damageEntity(CombatEntity entity, int damage) {
+        entity.applyDamage(damage);
     }
 
     private void spawnExperienceOrbs(double x, double y, int totalXp) {
@@ -947,7 +1066,28 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
         attackCooldown = Math.min(attackCooldown, 0.12);
     }
 
-    private boolean canMove(double x, double y, double radius) {
+    private boolean moveCombatUnit(CombatUnit unit, double deltaX, double deltaY) {
+        double oldX = unit.getX();
+        double oldY = unit.getY();
+        tryMoveCombatUnit(unit, unit.getX() + deltaX, unit.getY() + deltaY);
+        return distance(oldX, oldY, unit.getX(), unit.getY()) > 0.01;
+    }
+
+    private boolean tryMoveCombatUnit(CombatUnit unit, double targetX, double targetY) {
+        boolean moved = false;
+        if (canOccupy(unit, targetX, unit.getY())) {
+            unit.setX(targetX);
+            moved = true;
+        }
+        if (canOccupy(unit, unit.getX(), targetY)) {
+            unit.setY(targetY);
+            moved = true;
+        }
+        return moved;
+    }
+
+    private boolean canOccupy(CombatEntity entity, double x, double y) {
+        double radius = entity.getRadius();
         return !map.isBlockedPixel(x - radius, y - radius)
                 && !map.isBlockedPixel(x + radius, y - radius)
                 && !map.isBlockedPixel(x - radius, y + radius)
@@ -1088,25 +1228,17 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
         int sx = worldToScreenX(creep.x);
         int sy = worldToScreenY(creep.y);
         int r = (int) Math.round(creep.radius * ZOOM);
+        BufferedImage sprite = creep.team == Team.LIGHT
+                ? sprites.getPlayerFrame(creep.state, creep.animPhase)
+                : sprites.getEnemyFrame(creep.state, creep.animPhase);
+        drawSpriteWithFacing(g2, sprite, sx, sy, creep.lookAngle);
 
-        Color fill;
-        Color stroke;
-        if (creep.team == Team.LIGHT) {
-            fill = new Color(121, 188, 255);
-            stroke = new Color(34, 86, 146);
-        } else if (creep.team == Team.DARK) {
-            fill = new Color(231, 99, 92);
-            stroke = new Color(123, 42, 39);
-        } else {
-            fill = new Color(180, 155, 102);
-            stroke = new Color(104, 82, 49);
+        if (creep.state == AnimationState.ATTACK) {
+            g2.setColor(creep.team == Team.LIGHT
+                    ? new Color(107, 198, 255, 110)
+                    : new Color(255, 118, 92, 110));
+            g2.fillOval(sx - r - 4, sy - r - 4, r * 2 + 8, r * 2 + 8);
         }
-
-        g2.setColor(fill);
-        g2.fillOval(sx - r, sy - r, r * 2, r * 2);
-        g2.setColor(stroke);
-        g2.setStroke(new BasicStroke((float) (1.8f * ZOOM / 2.0)));
-        g2.drawOval(sx - r, sy - r, r * 2, r * 2);
 
         drawHealthBar(g2, sx, sy - r - 10, 28, 5,
                 (double) creep.hp / creep.maxHp,
