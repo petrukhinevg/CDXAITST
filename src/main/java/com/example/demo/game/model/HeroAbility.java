@@ -5,13 +5,15 @@ public class HeroAbility {
     private final String displayName;
     private final double cooldownSeconds;
     private final boolean ultimate;
+    private final int manaCost;
     private double remainingCooldown;
 
-    public HeroAbility(AbilitySlot slot, String displayName, double cooldownSeconds, boolean ultimate) {
+    public HeroAbility(AbilitySlot slot, String displayName, double cooldownSeconds, boolean ultimate, int manaCost) {
         this.slot = slot;
         this.displayName = displayName;
         this.cooldownSeconds = cooldownSeconds;
         this.ultimate = ultimate;
+        this.manaCost = manaCost;
     }
 
     public AbilitySlot slot() {
@@ -28,6 +30,10 @@ public class HeroAbility {
 
     public boolean ultimate() {
         return ultimate;
+    }
+
+    public int manaCost() {
+        return manaCost;
     }
 
     public double remainingCooldown() {

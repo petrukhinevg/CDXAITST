@@ -10,6 +10,7 @@ import com.example.demo.game.model.CombatUnit;
 import com.example.demo.game.model.Creep;
 import com.example.demo.game.model.CreepRole;
 import com.example.demo.game.model.ExperienceOrb;
+import com.example.demo.game.model.HeroAttribute;
 import com.example.demo.game.model.HeroAbility;
 import com.example.demo.game.model.LaneCreepType;
 import com.example.demo.game.model.LaneType;
@@ -125,6 +126,7 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
     private static final double CLICK_MARKER_OUTER_FADE_DURATION = 1.0;
     private static final double CLICK_MARKER_INNER_FADE_DURATION = 0.45;
     private static final double CLICK_MARKER_LIFETIME = CLICK_MARKER_OUTER_FADE_DURATION + CLICK_MARKER_INNER_FADE_DURATION;
+    private static final double CLICK_MARKER_ARROW_SPEED_MULTIPLIER = 1.25;
     private static final double CLICK_MARKER_SCALE = 0.5;
     private static final int HEALTH_BAR_TICK_HP = 250;
     private static final double DENY_INDICATOR_DURATION = 0.9;
@@ -300,9 +302,7 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
         hero.spawnY = hero.y;
         hero.radius = STANDARD_UNIT_RADIUS;
         hero.team = team;
-        hero.maxHp = 120;
-        hero.hp = hero.maxHp;
-        hero.defense = 2;
+        hero.initializeAttributes(HeroAttribute.AGILITY);
         hero.level = 1;
         hero.xp = 0;
         hero.xpToNextLevel = 50;
@@ -404,9 +404,9 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
 
     private void initHeroAbilities() {
         heroAbilities.clear();
-        heroAbilities.add(new HeroAbility(AbilitySlot.PRIMARY, "Навык I", 8.0, false));
-        heroAbilities.add(new HeroAbility(AbilitySlot.SECONDARY, "Навык II", 12.0, false));
-        heroAbilities.add(new HeroAbility(AbilitySlot.ULTIMATE, "Ультимейт", 40.0, true));
+        heroAbilities.add(new HeroAbility(AbilitySlot.PRIMARY, "Навык I", 8.0, false, 30));
+        heroAbilities.add(new HeroAbility(AbilitySlot.SECONDARY, "Навык II", 12.0, false, 45));
+        heroAbilities.add(new HeroAbility(AbilitySlot.ULTIMATE, "Ультимейт", 40.0, true, 90));
     }
 
     private void spawnLaneWave() {
@@ -561,6 +561,7 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
             hero.hitCooldown = Math.max(0.0, hero.hitCooldown - dt);
             hero.attackTimer = Math.max(0.0, hero.attackTimer - dt);
             hero.attackAnimationTimer = Math.max(0.0, hero.attackAnimationTimer - dt);
+            hero.regenerate(dt);
         }
 
         for (HeroAbility ability : heroAbilities) {
@@ -831,6 +832,18 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
         return currentWeapon.meleeRange() * ATTACK_RANGE_BALANCE_SCALE;
     }
 
+    private int heroWeaponDamage(Player hero, WeaponType weapon) {
+        return weapon.damage() + hero.attackDamageBonus;
+    }
+
+    private double heroAttackCooldown(Player hero, WeaponType weapon) {
+        return Math.max(0.08, weapon.cooldown() / Math.max(0.4, hero.attackSpeedMultiplier));
+    }
+
+    private double heroAttackAnimationTime(Player hero, WeaponType weapon) {
+        return Math.max(0.08, weapon.attackAnimationTime() / Math.max(0.55, hero.attackSpeedMultiplier));
+    }
+
     private double scaleAttackRange(double range) {
         return range * ATTACK_RANGE_BALANCE_SCALE;
     }
@@ -1000,7 +1013,7 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
     private void respawnHero(Player hero) {
         hero.x = hero.spawnX;
         hero.y = hero.spawnY;
-        hero.hp = hero.maxHp;
+        hero.restoreFullResources();
         hero.moving = false;
         hero.hitCooldown = 0.0;
         hero.respawnTimer = 0.0;
@@ -1017,10 +1030,11 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
     }
 
     private void attackWithCurrentWeapon() {
-        player.attackTimer = currentWeapon.attackAnimationTime();
-        player.attackAnimationTimer = currentWeapon.attackAnimationTime();
+        double attackAnimationTime = heroAttackAnimationTime(player, currentWeapon);
+        player.attackTimer = attackAnimationTime;
+        player.attackAnimationTimer = attackAnimationTime;
         player.animPhase = 0.0;
-        attackCooldown = currentWeapon.cooldown();
+        attackCooldown = heroAttackCooldown(player, currentWeapon);
         audio.onPlayerAttack(currentWeapon);
 
         if (currentWeapon.projectile()) {
@@ -1048,7 +1062,7 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
         bullet.vy = dy * weapon.projectileSpeed();
         bullet.radius = weapon.projectileRadius();
         bullet.life = weapon.projectileLife() * ATTACK_RANGE_BALANCE_SCALE;
-        bullet.damage = weapon.damage();
+        bullet.damage = heroWeaponDamage(player, weapon);
         bullet.colorArgb = weapon.projectileColorArgb();
         bullet.target = target;
         bullet.ownerTeam = player.team;
@@ -1058,25 +1072,26 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
     private void performMeleeAttack(WeaponType weapon) {
         double arcHalf = Math.toRadians(weapon.meleeArcDegrees() / 2.0);
         double meleeRange = weapon.meleeRange() * ATTACK_RANGE_BALANCE_SCALE;
+        int damage = heroWeaponDamage(player, weapon);
         boolean hitSomething = false;
 
         for (Player hero : heroes) {
             if (isHostileHero(hero) && inMeleeArc(hero.x, hero.y, meleeRange + hero.radius, arcHalf)) {
-                damageHero(hero, weapon.damage());
+                damageHero(hero, damage);
                 hitSomething = true;
             }
         }
 
         for (Creep creep : laneCreeps) {
             if (isAttackablePlayerCreepTarget(creep) && inMeleeArc(creep.x, creep.y, meleeRange + creep.radius, arcHalf)) {
-                damageCreepByHero(creep, weapon.damage());
+                damageCreepByHero(creep, damage);
                 hitSomething = true;
             }
         }
 
         for (Creep creep : neutralCreeps) {
             if (isAttackablePlayerCreepTarget(creep) && inMeleeArc(creep.x, creep.y, meleeRange + creep.radius, arcHalf)) {
-                damageCreepByHero(creep, weapon.damage());
+                damageCreepByHero(creep, damage);
                 hitSomething = true;
             }
         }
@@ -1084,7 +1099,7 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
         for (Structure structure : structures) {
             if (isHostileStructure(structure) && structure.hp > 0
                     && inMeleeArc(structure.x, structure.y, meleeRange + structure.radius, arcHalf)) {
-                damageStructure(structure, weapon.damage());
+                damageStructure(structure, damage);
                 hitSomething = true;
             }
         }
@@ -2421,11 +2436,14 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
     private void gainExperience(int value) {
         player.xp += value;
         while (player.xp >= player.xpToNextLevel) {
+            int previousMaxHp = player.maxHp;
+            int previousMaxMana = player.maxMana;
             player.xp -= player.xpToNextLevel;
             player.level += 1;
             player.xpToNextLevel = (int) Math.round(player.xpToNextLevel * 1.33 + 12);
-            player.maxHp += 10;
-            player.hp = Math.min(player.maxHp, player.hp + 18);
+            player.applyLevelUpAttributes();
+            player.hp = Math.min(player.maxHp, player.hp + Math.max(0, player.maxHp - previousMaxHp));
+            player.mana = Math.min(player.maxMana, player.mana + Math.max(0, player.maxMana - previousMaxMana));
             clearPlayerDamageBarQueue();
         }
     }
@@ -2688,12 +2706,12 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
     }
 
     private void triggerAbility(AbilitySlot slot) {
-        if (gameOver) {
+        if (gameOver || player.hp <= 0) {
             return;
         }
 
         HeroAbility ability = findAbility(slot);
-        if (ability == null || !ability.isReady()) {
+        if (ability == null || !ability.isReady() || !player.spendMana(ability.manaCost())) {
             return;
         }
 
@@ -3798,7 +3816,11 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
         Color innerCore = attack ? new Color(255, 196, 182) : new Color(188, 255, 206);
         Color glow = attack ? new Color(255, 102, 84, 84) : new Color(82, 236, 124, 78);
 
-        double outerTravel = smoothstep(clamp(elapsed / CLICK_MARKER_OUTER_FADE_DURATION, 0.0, 1.0));
+        double outerTravel = smoothstep(clamp(
+                elapsed * CLICK_MARKER_ARROW_SPEED_MULTIPLIER / CLICK_MARKER_OUTER_FADE_DURATION,
+                0.0,
+                1.0
+        ));
         double outerFade = 1.0 - smoothstep(clamp(elapsed / CLICK_MARKER_OUTER_FADE_DURATION, 0.0, 1.0));
         drawClickArrowWave(
                 g2,
@@ -3813,7 +3835,11 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
         );
 
         double innerElapsed = Math.max(0.0, elapsed - CLICK_MARKER_OUTER_FADE_DURATION);
-        double innerTravel = smoothstep(clamp(innerElapsed / CLICK_MARKER_INNER_FADE_DURATION, 0.0, 1.0));
+        double innerTravel = smoothstep(clamp(
+                innerElapsed * CLICK_MARKER_ARROW_SPEED_MULTIPLIER / CLICK_MARKER_INNER_FADE_DURATION,
+                0.0,
+                1.0
+        ));
         double innerFade = 1.0 - smoothstep(clamp(innerElapsed / CLICK_MARKER_INNER_FADE_DURATION, 0.0, 1.0));
         drawClickArrowWave(
                 g2,
@@ -3827,10 +3853,20 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
                 visibilityAlpha(210, innerFade)
         );
 
-        int coreAlpha = visibilityAlpha(160, innerFade);
-        int coreRadius = scaledClickSize(2.8);
-        g2.setColor(new Color(innerCore.getRed(), innerCore.getGreen(), innerCore.getBlue(), coreAlpha));
+        double centerProgress = smoothstep(clamp(elapsed / CLICK_MARKER_LIFETIME, 0.0, 1.0));
+        double centerFade = 1.0 - smoothstep(clamp(elapsed / CLICK_MARKER_LIFETIME, 0.0, 1.0));
+        int circleRadius = (int) Math.round(lerp(scaledClickSize(4.8), scaledClickSize(2.0), centerProgress));
+        int circleAlpha = visibilityAlpha(170, centerFade);
+        int glowRadius = circleRadius + scaledClickSize(1.6);
+        Stroke oldStroke = g2.getStroke();
+        g2.setColor(new Color(glow.getRed(), glow.getGreen(), glow.getBlue(), Math.max(0, circleAlpha / 3)));
+        g2.fillOval(sx - glowRadius, sy - glowRadius, glowRadius * 2, glowRadius * 2);
+        g2.setStroke(new BasicStroke(1.2f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+        g2.setColor(new Color(innerCore.getRed(), innerCore.getGreen(), innerCore.getBlue(), circleAlpha));
+        g2.drawOval(sx - circleRadius, sy - circleRadius, circleRadius * 2, circleRadius * 2);
+        int coreRadius = Math.max(1, scaledClickSize(1.3));
         g2.fillOval(sx - coreRadius, sy - coreRadius, coreRadius * 2, coreRadius * 2);
+        g2.setStroke(oldStroke);
     }
 
     private void drawClickArrowWave(Graphics2D g2,
@@ -4763,10 +4799,10 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
 
         int px = worldToScreenX(player.x);
         int py = worldToScreenY(player.y);
-        int topY = py - (int) Math.round(40 * ZOOM);
+        int topY = py - (int) Math.round(44 * ZOOM);
 
         g2.setColor(new Color(0, 0, 0, 125));
-        g2.fillRoundRect(px - 58, topY - 20, 116, 34, 12, 12);
+        g2.fillRoundRect(px - 58, topY - 20, 116, 43, 12, 12);
 
         g2.setColor(new Color(28, 34, 42, 220));
         g2.fillOval(px - 58, topY - 18, 24, 24);
@@ -4781,9 +4817,10 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
         g2.setFont(new Font("SansSerif", Font.BOLD, 12));
         String weaponText = currentWeapon.displayName();
         int weaponW = g2.getFontMetrics().stringWidth(weaponText);
-        g2.drawString(weaponText, px - weaponW / 2, topY - 6);
+        g2.drawString(weaponText, px - weaponW / 2, topY - 7);
 
-        drawPlayerHealthBar(g2, px + 8, topY + 7, 86, 8);
+        drawPlayerHealthBar(g2, px + 8, topY + 4, 86, 8);
+        drawPlayerManaBar(g2, px + 8, topY + 15, 86, 6);
     }
 
     private void drawHeldWeapon(Graphics2D g2, int px, int py) {
@@ -5193,6 +5230,11 @@ public class GamePanel extends JPanel implements KeyListener, MouseMotionListene
 
         g2.setColor(new Color(220, 220, 220, 170));
         g2.drawRoundRect(x, y, width, height, 6, 6);
+    }
+
+    private void drawPlayerManaBar(Graphics2D g2, int centerX, int y, int width, int height) {
+        double manaRatio = player.maxMana == 0 ? 0.0 : clamp((double) player.mana / player.maxMana, 0.0, 1.0);
+        drawHealthBar(g2, centerX, y, width, height, player.mana, player.maxMana, manaRatio, new Color(82, 166, 236));
     }
 
     private void drawHealthBarTicks(Graphics2D g2, int x, int y, int width, int height, int maxHp) {

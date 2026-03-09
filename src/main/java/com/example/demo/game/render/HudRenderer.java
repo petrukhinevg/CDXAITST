@@ -1,6 +1,7 @@
 package com.example.demo.game.render;
 
 import com.example.demo.game.model.Creep;
+import com.example.demo.game.model.HeroAttribute;
 import com.example.demo.game.model.HeroAbility;
 import com.example.demo.game.model.Player;
 import com.example.demo.game.model.Structure;
@@ -89,7 +90,7 @@ public final class HudRenderer {
 
     private void drawProgressPanel(Graphics2D g2, Model model) {
         int panelW = Math.min(560, Math.max(420, model.panelWidth() - 420));
-        int panelH = 180;
+        int panelH = 232;
         int panelX = (model.panelWidth() - panelW) / 2;
         int panelY = model.panelHeight() - panelH - 18;
 
@@ -98,24 +99,32 @@ public final class HudRenderer {
         g2.setFont(new Font("SansSerif", Font.PLAIN, 14));
 
         drawHudText(g2, "Оружие: " + model.currentWeapon().displayName(), panelX, panelY + 44);
-        drawHudText(g2, "HP: " + model.player().hp + " / " + model.player().maxHp, panelX, panelY + 70);
-        drawBar(g2, panelX, panelY + 80, panelW, 13,
+        drawHudText(g2, "Уровень: " + model.player().level + "   Осн. атрибут: " + model.player().primaryAttribute.shortLabel(), panelX, panelY + 64);
+
+        drawHudText(g2, "HP: " + model.player().hp + " / " + model.player().maxHp, panelX, panelY + 88);
+        drawBar(g2, panelX, panelY + 98, panelW, 13,
                 model.player().maxHp == 0 ? 0.0 : (double) model.player().hp / model.player().maxHp,
                 new Color(224, 88, 84), new Color(96, 32, 30), new Color(190, 190, 190));
 
-        drawHudText(g2, "XP: " + model.player().xp + " / " + model.player().xpToNextLevel, panelX, panelY + 102);
-        drawBar(g2, panelX, panelY + 112, panelW, 13,
+        drawHudText(g2, "MP: " + model.player().mana + " / " + model.player().maxMana, panelX, panelY + 120);
+        drawBar(g2, panelX, panelY + 130, panelW, 13,
+                model.player().maxMana == 0 ? 0.0 : (double) model.player().mana / model.player().maxMana,
+                new Color(82, 166, 236), new Color(27, 54, 87), new Color(190, 190, 190));
+
+        drawHudText(g2, "XP: " + model.player().xp + " / " + model.player().xpToNextLevel, panelX, panelY + 152);
+        drawBar(g2, panelX, panelY + 162, panelW, 13,
                 model.player().xpToNextLevel == 0 ? 0.0 : (double) model.player().xp / model.player().xpToNextLevel,
                 new Color(91, 190, 255), new Color(31, 67, 93), new Color(190, 190, 190));
+        drawHudText(g2, attributeLine(model.player()), panelX, panelY + 186);
 
         g2.setFont(new Font("SansSerif", Font.PLAIN, 12));
         int slotGap = 10;
-        int abilityY = panelY + 136;
+        int abilityY = panelY + 198;
         int abilityW = (panelW - slotGap * Math.max(0, model.abilities().size() - 1)) / Math.max(1, model.abilities().size());
-        int abilityH = 28;
+        int abilityH = 30;
         int abilityX = panelX;
         for (HeroAbility ability : model.abilities()) {
-            drawAbilitySlot(g2, abilityX, abilityY, abilityW, abilityH, ability);
+            drawAbilitySlot(g2, abilityX, abilityY, abilityW, abilityH, ability, model.player().mana);
             abilityX += abilityW + slotGap;
         }
     }
@@ -249,14 +258,28 @@ public final class HudRenderer {
         g2.drawString(text, x, y);
     }
 
-    private void drawAbilitySlot(Graphics2D g2, int x, int y, int width, int height, HeroAbility ability) {
+    private String attributeLine(Player player) {
+        return player.primaryAttribute == HeroAttribute.STRENGTH
+                ? "СИЛ* " + player.strength + "   ЛОВ " + player.agility + "   ИНТ " + player.intelligence
+                : player.primaryAttribute == HeroAttribute.AGILITY
+                ? "СИЛ " + player.strength + "   ЛОВ* " + player.agility + "   ИНТ " + player.intelligence
+                : "СИЛ " + player.strength + "   ЛОВ " + player.agility + "   ИНТ* " + player.intelligence;
+    }
+
+    private void drawAbilitySlot(Graphics2D g2, int x, int y, int width, int height, HeroAbility ability, int currentMana) {
+        boolean ready = ability.isReady();
+        boolean enoughMana = currentMana >= ability.manaCost();
         Color fill = ability.ultimate()
                 ? new Color(130, 82, 40, 205)
                 : new Color(38, 70, 88, 205);
-        if (!ability.isReady()) {
+        if (!ready) {
             fill = ability.ultimate()
                     ? new Color(78, 54, 30, 205)
                     : new Color(28, 42, 54, 205);
+        } else if (!enoughMana) {
+            fill = ability.ultimate()
+                    ? new Color(92, 56, 34, 205)
+                    : new Color(28, 46, 62, 205);
         }
 
         g2.setColor(fill);
@@ -274,9 +297,12 @@ public final class HudRenderer {
         }
         g2.drawString(name, x + 28, y + 18);
 
-        String stateText = ability.isReady()
-                ? "готово"
-                : String.format("%.0fs", Math.ceil(ability.remainingCooldown()));
+        String stateText;
+        if (!ready) {
+            stateText = String.format("%.0fs", Math.ceil(ability.remainingCooldown()));
+        } else {
+            stateText = enoughMana ? "готово" : ability.manaCost() + " MP";
+        }
         int stateW = g2.getFontMetrics().stringWidth(stateText);
         g2.drawString(stateText, x + width - stateW - 8, y + 18);
     }
